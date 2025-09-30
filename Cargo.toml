@@ -1,0 +1,24 @@
+[package]
+name = "trpg-discord-bot"
+version = "0.1.0"
+edition = "2024"
+
+# Disable deprecation warnings for the entire package
+# This is necessary because we're using the deprecated StandardFramework from serenity
+# which generates many deprecation warnings that we can't easily fix without major refactoring
+[package.metadata.rust]
+# We allow deprecated warnings since we're intentionally using deprecated APIs
+# for compatibility with the current serenity version
+rustflags = ["-A", "deprecated"]
+
+[dependencies]
+dotenvy = "0.15.7"
+serenity = { version = "0.12.4", features = ["client", "gateway", "rustls_backend", "unstable_discord_api"] }
+tokio = { version = "1.47.1", features = ["macros", "rt-multi-thread"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+regex = "1.10"
+chrono = { version = "0.4", features = ["serde"] }
+log = "0.4"
+env_logger = "0.11"
+rand = "0.8.5"

@@ -1,0 +1,10 @@
+{
+  "global": {
+    "developers": [],
+    "restart_mode": "execv",
+    "restart_service": null,
+    "global_stream_enabled": false,
+    "global_stream_channel": null
+  },
+  "guilds": {}
+}
