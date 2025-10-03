@@ -1,62 +1,83 @@
+use std::collections::HashMap;
+use std::time::Duration;
+
 use crate::bot::{Context, Error};
-use poise::ChoiceParameter;
+use poise::{
+    CreateReply,
+    serenity_prelude::{self as serenity, CreateActionRow, CreateButton},
+};
 
-#[derive(Clone, Copy, Debug, ChoiceParameter)]
-pub enum HelpMode {
-    #[name = "summary"]
-    Summary,
-    #[name = "detailed"]
-    Detailed,
-}
-
-/// 顯示指令快速說明
+/// 顯示指令說明（含按鈕）
 #[poise::command(slash_command)]
-pub async fn help(
-    ctx: Context<'_>,
-    #[description = "顯示模式"] mode: Option<HelpMode>,
-) -> Result<(), Error> {
-    match mode.unwrap_or(HelpMode::Summary) {
-        HelpMode::Summary => {
-            ctx.say(
-                "TRPG Discord Bot 指令速覽:\n\
-\n\
-/roll <表達式> — 擲 D&D 骰子，支援比較與批次擲骰。\n\
-/coc <技能值> — CoC 7e 判定並顯示成功等級。\n\
-/log-stream <on|off> [頻道] — 控制日誌串流開關。\n\
-/log-stream-mode <live|batch> — 切換串流輸出模式。\n\
-/admin <restart|dev-add|dev-remove|dev-list> — 開發者專用管理指令。\n\
-/help [summary|detailed] — 顯示這份簡表或詳細版。",
-            )
-            .await?;
-        }
-        HelpMode::Detailed => {
-            ctx.say(
-                r#"
-# TRPG Discord Bot 說明
+pub async fn help(ctx: Context<'_>) -> Result<(), Error> {
+    let embed = serenity::CreateEmbed::default()
+        .title("TRPG Discord Bot 指令說明")
+        .description(
+            "請點擊下方按鈕查看各指令的詳細說明。\n支援 `/roll`、`/coc`、`/log-stream`、`/log-stream-mode`、`/admin`。",
+        )
+        .colour(serenity::Colour::FOOYOO);
 
-## 擲骰
-- `/roll <骰子表達式>`：一般 D&D 擲骰，支援：
-  - 數量/面數：`2d6`、`d20`
-  - 修正值：`1d20+5`
-  - 比較：`1d10>=15`
-  - 批次：`+3 d6`（連續擲 3 次）
-- `/coc <技能值>`：CoC 7e 判定，自動回報成功等級、極限/困難成功與大成/失敗。
+    let components = vec![CreateActionRow::Buttons(vec![
+        CreateButton::new("help_roll")
+            .label("D&D 擲骰")
+            .style(serenity::ButtonStyle::Primary),
+        CreateButton::new("help_coc")
+            .label("CoC 擲骰")
+            .style(serenity::ButtonStyle::Primary),
+        CreateButton::new("help_logs")
+            .label("日誌指令")
+            .style(serenity::ButtonStyle::Secondary),
+        CreateButton::new("help_admin")
+            .label("管理指令")
+            .style(serenity::ButtonStyle::Secondary),
+    ])];
 
-## 日誌控制
-- `/log-stream on <頻道>`：啟用串流並綁定文字頻道。
-- `/log-stream off`：關閉串流輸出。
-- `/log-stream-mode <live|batch>`：切換即時或批次模式。
+    let reply = CreateReply::default().embed(embed).components(components);
 
-## 管理（僅開發者）
-- `/admin restart`：發出重啟指令（目前為提示）。
-- `/admin dev-add <用戶>` / `/admin dev-remove <用戶>`：維護開發者名單。
-- `/admin dev-list`：列出所有已註冊開發者。
+    let sent = ctx.send(reply).await?;
+    let message = sent.message().await?;
+    let author_id = ctx.author().id;
 
-## 其他
-- `/help [summary|detailed]`：切換本說明的摘要或完整內容。
-                "#,
-            )
-            .await?;
+    let mut details = HashMap::new();
+    details.insert(
+        "help_roll",
+        "**/roll <骰子表達式>**\n支援 `2d6`、`d20+5`、`1d10>=15`、`+3 d6` 等格式，解析骰數、面數、修正值與比較條件。預設最多 50 次擲骰。",
+    );
+    details.insert(
+        "help_coc",
+        "**/coc <技能值> [次數]**\n技能值 1-100，可設定 1-10 次連續擲骰。自動判斷普通/困難/極限成功、大成功（1）與大失敗（技能<50 時 96-100，否則 100）。",
+    );
+    details.insert(
+        "help_logs",
+        "**日誌相關指令**\n`/log-stream on <頻道>`：啟用串流並綁定頻道。\n`/log-stream off`：關閉日誌串流。\n`/log-stream-mode <live|batch>`：在即時或批次模式間切換。",
+    );
+    details.insert(
+        "help_admin",
+        "**管理指令（需開發者）**\n`/admin restart`：觸發重啟提示。\n`/admin dev-add <用戶>` / `/admin dev-remove <用戶>`：維護開發者名單。\n`/admin dev-list`：列出所有已註冊開發者。",
+    );
+
+    let serenity_ctx = ctx.serenity_context();
+    loop {
+        let interaction = message
+            .await_component_interaction(serenity_ctx)
+            .timeout(Duration::from_secs(120))
+            .author_id(author_id)
+            .await;
+
+        let Some(interaction) = interaction else {
+            break;
+        };
+
+        if let Some(detail) = details.get(interaction.data.custom_id.as_str()) {
+            let detail_embed = serenity::CreateEmbed::default()
+                .title("指令說明")
+                .description(detail.to_string())
+                .colour(serenity::Colour::FOOYOO);
+            let message = serenity::CreateInteractionResponseMessage::default()
+                .ephemeral(true)
+                .add_embed(detail_embed);
+            let response = serenity::CreateInteractionResponse::Message(message);
+            let _ = interaction.create_response(serenity_ctx, response).await;
         }
     }
 

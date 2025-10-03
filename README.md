@@ -37,7 +37,7 @@ cargo run --release
 
 ### 擲骰指令
 - `/roll <骰子表達式>` - D&D 擲骰
-- `/coc <技能值>` - CoC 7e 擲骰
+- `/coc <技能值> [次數]` - CoC 7e 擲骰，支援 1-10 次連續判定
 
 ### 日誌指令
 - `/log-stream <on|off> [頻道]` - 控制日誌串流開關

@@ -3,8 +3,12 @@ use once_cell::sync::Lazy;
 use std::collections::HashSet;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use thiserror::Error;
+
+const MAX_LOG_SIZE: u64 = 1 * 1024 * 1024; // 1 MiB per log file
+const MAX_LOG_BACKUPS: usize = 5;
 
 #[derive(Debug, Error)]
 pub enum LoggerError {
@@ -17,6 +21,7 @@ pub enum LoggerError {
 #[derive(Debug)]
 struct LoggerState {
     file: Option<File>,
+    path: Option<PathBuf>,
     last_entry: Option<String>,
     repeat_count: u32,
 }
@@ -27,8 +32,9 @@ pub struct DiscordLogger {
 
 impl DiscordLogger {
     pub fn new(log_file: Option<&str>) -> Result<DiscordLogger, std::io::Error> {
-        let file = if let Some(path) = log_file {
-            Some(OpenOptions::new().create(true).append(true).open(path)?)
+        let path = log_file.map(PathBuf::from);
+        let file = if let Some(p) = path.as_ref() {
+            Some(OpenOptions::new().create(true).append(true).open(p)?)
         } else {
             None
         };
@@ -36,6 +42,7 @@ impl DiscordLogger {
         Ok(DiscordLogger {
             state: Mutex::new(LoggerState {
                 file,
+                path,
                 last_entry: None,
                 repeat_count: 0,
             }),
@@ -51,11 +58,88 @@ impl DiscordLogger {
 
     fn write_message(state: &mut LoggerState, message: &str) {
         println!("{}", message);
+        Self::ensure_capacity(state, message.len() + 1);
+
         if let Some(file) = state.file.as_mut() {
             if let Err(e) = writeln!(file, "{}", message) {
                 eprintln!("Failed to write log entry: {}", e);
             }
         }
+    }
+
+    fn ensure_capacity(state: &mut LoggerState, incoming_len: usize) {
+        let path = match state.path.clone() {
+            Some(p) => p,
+            None => return,
+        };
+
+        let mut file = match state.file.take() {
+            Some(f) => f,
+            None => match OpenOptions::new().create(true).append(true).open(&path) {
+                Ok(f) => f,
+                Err(e) => {
+                    eprintln!("Failed to open log file: {}", e);
+                    return;
+                }
+            },
+        };
+
+        let needs_rotate = match file.metadata() {
+            Ok(metadata) => metadata.len().saturating_add(incoming_len as u64) > MAX_LOG_SIZE,
+            Err(e) => {
+                eprintln!("Failed to inspect log file: {}", e);
+                false
+            }
+        };
+
+        if needs_rotate {
+            let _ = file.flush();
+            drop(file);
+
+            if let Err(e) = Self::rotate_logs(&path) {
+                eprintln!("Failed to rotate log file: {}", e);
+            }
+
+            match OpenOptions::new().create(true).append(true).open(&path) {
+                Ok(f) => state.file = Some(f),
+                Err(e) => {
+                    eprintln!("Failed to reopen log file: {}", e);
+                    state.file = None;
+                }
+            }
+        } else {
+            state.file = Some(file);
+        }
+    }
+
+    fn rotate_logs(path: &Path) -> std::io::Result<()> {
+        if MAX_LOG_BACKUPS == 0 {
+            let _ = std::fs::remove_file(path);
+            return Ok(());
+        }
+
+        let oldest = Self::backup_path(path, MAX_LOG_BACKUPS);
+        if oldest.exists() {
+            let _ = std::fs::remove_file(&oldest);
+        }
+
+        for index in (1..MAX_LOG_BACKUPS).rev() {
+            let from = Self::backup_path(path, index);
+            if from.exists() {
+                let to = Self::backup_path(path, index + 1);
+                let _ = std::fs::rename(&from, &to);
+            }
+        }
+
+        if path.exists() {
+            std::fs::rename(path, Self::backup_path(path, 1))?;
+        }
+
+        Ok(())
+    }
+
+    fn backup_path(path: &Path, index: usize) -> PathBuf {
+        PathBuf::from(format!("{}.{}", path.display(), index))
     }
 
     fn emit_repeat_summary(state: &mut LoggerState) {
@@ -78,8 +162,16 @@ impl Log for DiscordLogger {
         }
 
         const SUPPRESS_THRESHOLD: u32 = 10;
-        static NOISY_PATTERNS: Lazy<HashSet<&'static str>> =
-            Lazy::new(|| HashSet::from(["do_heartbeat", "recv_event", "recv;"]));
+        static NOISY_PATTERNS: Lazy<HashSet<&'static str>> = Lazy::new(|| {
+            HashSet::from([
+                "do_heartbeat",
+                "recv_event",
+                "recv;",
+                "request; self=Http",
+                "req=Request",
+                "post_hook; self=Ratelimit",
+            ])
+        });
 
         let message = record.args().to_string();
 
@@ -90,7 +182,7 @@ impl Log for DiscordLogger {
             return;
         }
 
-        let entry = format!("[{}] {}", record.level(), message);
+        let entry = format!("{}: {}", record.level(), message);
         let mut state = self.state.lock().expect("logger mutex poisoned");
 
         if let Some(last) = &state.last_entry {
@@ -137,6 +229,9 @@ mod tests {
         let logger = DiscordLogger::new(Some("test.log"));
         assert!(logger.is_ok());
         let _ = std::fs::remove_file("test.log");
+        for i in 1..=MAX_LOG_BACKUPS {
+            let _ = std::fs::remove_file(format!("test.log.{}", i));
+        }
     }
 
     #[test]
@@ -153,10 +248,7 @@ mod tests {
         }
 
         let state = logger.state.lock().unwrap();
-        assert_eq!(
-            state.last_entry.as_deref(),
-            Some("[INFO] duplicate message")
-        );
+        assert_eq!(state.last_entry.as_deref(), Some("INFO: duplicate message"));
         assert_eq!(state.repeat_count, 5);
     }
 }

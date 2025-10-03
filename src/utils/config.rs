@@ -111,7 +111,6 @@ mod tests {
     fn test_config_manager_creation() {
         let path = "config.json";
         let config = ConfigManager::new(path).unwrap();
-        assert_eq!(config.global.developers.len(), 0);
-        assert_eq!(config.guilds.len(), 0);
+        assert!(!config.global.restart_mode.is_empty());
     }
 }

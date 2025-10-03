@@ -21,6 +21,12 @@ pub fn roll_coc(skill_value: u8, rules: &CoCRules) -> RollResult {
     }
 }
 
+/// Roll multiple times for Call of Cthulhu 7th edition
+pub fn roll_coc_multi(skill_value: u8, times: u8, rules: &CoCRules) -> Vec<RollResult> {
+    let count = times.max(1);
+    (0..count).map(|_| roll_coc(skill_value, rules)).collect()
+}
+
 /// Determine the success level according to CoC 7e rules
 /// Returns: 1=critical success, 2=extreme success, 3=hard success, 4=regular success, 5=failure, 6=critical failure
 pub fn determine_success_level(roll: u16, skill_value: u8, rules: &CoCRules) -> u8 {
@@ -111,5 +117,15 @@ mod tests {
         assert_eq!(determine_success_level(50, 50, &rules), 4);
         // Failure
         assert_eq!(determine_success_level(51, 50, &rules), 5);
+    }
+
+    #[test]
+    fn test_roll_coc_multi() {
+        let rules = CoCRules::default();
+        let results = roll_coc_multi(60, 5, &rules);
+        assert_eq!(results.len(), 5);
+        for result in results {
+            assert!(result.total >= 1 && result.total <= 100);
+        }
     }
 }

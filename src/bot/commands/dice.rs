@@ -1,7 +1,8 @@
 use crate::bot::{Context, Error};
 use crate::models::types::RollResult;
-use crate::utils::coc::{determine_success_level, format_success_level, roll_coc};
+use crate::utils::coc::{determine_success_level, format_success_level, roll_coc_multi};
 use crate::utils::dice::roll_multiple_dice;
+use poise::{CreateReply, serenity_prelude as serenity};
 
 /// D&D 骰子指令 - 擲骰子
 #[poise::command(slash_command)]
@@ -22,13 +23,18 @@ pub async fn roll(
     match roll_multiple_dice(&expression, rules.max_dice_count, &rules) {
         Ok(results) => {
             if results.len() == 1 {
-                ctx.say(format_roll_result(&results[0])).await?;
+                send_embed(&ctx, "D&D 擲骰結果", format_roll_result(&results[0])).await?;
             } else {
-                ctx.say(format_multiple_roll_results(&results)).await?;
+                send_embed(
+                    &ctx,
+                    "D&D 連續擲骰結果",
+                    format_multiple_roll_results(&results),
+                )
+                .await?;
             }
         }
         Err(e) => {
-            ctx.say(format!("錯誤: {}", e)).await?;
+            send_embed(&ctx, "D&D 擲骰錯誤", format!("錯誤: {}", e)).await?;
         }
     }
 
@@ -43,6 +49,10 @@ pub async fn coc(
     #[min = 1]
     #[max = 100]
     skill: u8,
+    #[description = "擲骰次數 (1-10)"]
+    #[min = 1]
+    #[max = 10]
+    times: Option<u8>,
 ) -> Result<(), Error> {
     let guild_id = match ctx.guild_id() {
         Some(id) => id.get(),
@@ -58,24 +68,59 @@ pub async fn coc(
         config_handle.get_guild_config(guild_id).coc_rules
     };
 
-    let result = roll_coc(skill, &rules);
-    let success_level = determine_success_level(result.total as u16, skill, &rules);
-    let success_text = format_success_level(success_level);
+    let times = times.unwrap_or(1);
+    let results = roll_coc_multi(skill, times, &rules);
 
-    ctx.say(format!(
-        "🎯 CoC 7e 擲骰\n技能值: {}\n骰子結果: {}\n判定結果: {}{}",
-        skill,
-        result.rolls[0],
-        success_text,
-        if result.is_critical_success {
-            " ✨ 大成功!"
-        } else if result.is_critical_fail {
-            " 💥 大失敗!"
-        } else {
-            ""
+    if results.len() == 1 {
+        let result = &results[0];
+        let success_level = determine_success_level(result.total as u16, skill, &rules);
+        let success_text = format_success_level(success_level);
+        send_embed(
+            &ctx,
+            "CoC 7e 擲骰結果",
+            format!(
+                "技能值: {}\n骰子結果: {}\n判定結果: {}{}",
+                skill,
+                result.rolls[0],
+                success_text,
+                if result.is_critical_success {
+                    " ✨ 大成功!"
+                } else if result.is_critical_fail {
+                    " 💥 大失敗!"
+                } else {
+                    ""
+                }
+            ),
+        )
+        .await?;
+    } else {
+        let mut message = format!("連續擲骰次數: {}\n技能值: {}\n", results.len(), skill);
+        for (index, result) in results.iter().enumerate() {
+            let success_level = determine_success_level(result.total as u16, skill, &rules);
+            let success_text = format_success_level(success_level);
+            let crit = if result.is_critical_success {
+                " ✨"
+            } else if result.is_critical_fail {
+                " 💥"
+            } else {
+                ""
+            };
+            let status = match result.comparison_result {
+                Some(true) => " ✅",
+                Some(false) => " ❌",
+                None => "",
+            };
+            message.push_str(&format!(
+                "{}. {} → {}{}{}\n",
+                index + 1,
+                result.rolls[0],
+                success_text,
+                crit,
+                status
+            ));
         }
-    ))
-    .await?;
+        send_embed(&ctx, "CoC 7e 連續擲骰結果", message).await?;
+    }
 
     Ok(())
 }
@@ -140,4 +185,19 @@ fn format_multiple_roll_results(results: &[RollResult]) -> String {
     }
 
     output
+}
+
+async fn send_embed(
+    ctx: &Context<'_>,
+    title: impl Into<String>,
+    description: String,
+) -> Result<(), Error> {
+    let title = title.into();
+    let embed = serenity::CreateEmbed::default()
+        .title(title)
+        .description(description)
+        .colour(serenity::Colour::BLURPLE);
+    let reply = CreateReply::default().embed(embed);
+    ctx.send(reply).await?;
+    Ok(())
 }
