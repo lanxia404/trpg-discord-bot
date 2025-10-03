@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::bot::{Context, Error};
@@ -13,7 +14,7 @@ pub async fn help(ctx: Context<'_>) -> Result<(), Error> {
     let embed = serenity::CreateEmbed::default()
         .title("TRPG Discord Bot 指令說明")
         .description(
-            "請點擊下方按鈕查看各指令的詳細說明。\n支援 `/roll`、`/coc`、`/log-stream`、`/log-stream-mode`、`/admin`。",
+            "請點擊下方按鈕查看各指令的詳細說明。\n支援 `/roll`、`/coc`、`/log-stream`、`/log-stream-mode`、`/crit`、`/admin`。",
         )
         .colour(serenity::Colour::FOOYOO);
 
@@ -35,7 +36,7 @@ pub async fn help(ctx: Context<'_>) -> Result<(), Error> {
     let reply = CreateReply::default().embed(embed).components(components);
 
     let sent = ctx.send(reply).await?;
-    let message = sent.message().await?;
+    let message = Arc::new(sent.into_message().await?);
     let author_id = ctx.author().id;
 
     let mut details = HashMap::new();
@@ -49,37 +50,43 @@ pub async fn help(ctx: Context<'_>) -> Result<(), Error> {
     );
     details.insert(
         "help_logs",
-        "**日誌相關指令**\n`/log-stream on <頻道>`：啟用串流並綁定頻道。\n`/log-stream off`：關閉日誌串流。\n`/log-stream-mode <live|batch>`：在即時或批次模式間切換。",
+        "**日誌相關指令**\n`/log-stream on <頻道>`：啟用串流並綁定頻道。\n`/log-stream off`：關閉串流。\n`/log-stream-mode <live|batch>`：切換即時或批次。\n`/crit <success|fail> [頻道]`：設定大成功/大失敗紀錄頻道，留空則清除設定。",
     );
     details.insert(
         "help_admin",
         "**管理指令（需開發者）**\n`/admin restart`：觸發重啟提示。\n`/admin dev-add <用戶>` / `/admin dev-remove <用戶>`：維護開發者名單。\n`/admin dev-list`：列出所有已註冊開發者。",
     );
 
-    let serenity_ctx = ctx.serenity_context();
-    loop {
-        let interaction = message
-            .await_component_interaction(serenity_ctx)
-            .timeout(Duration::from_secs(120))
-            .author_id(author_id)
-            .await;
+    let details = Arc::new(details);
+    let ctx_clone = ctx.serenity_context().clone();
+    let message_handle = Arc::clone(&message);
+    let details_handle = Arc::clone(&details);
 
-        let Some(interaction) = interaction else {
-            break;
-        };
+    tokio::spawn(async move {
+        loop {
+            let interaction = message_handle
+                .await_component_interaction(&ctx_clone)
+                .timeout(Duration::from_secs(120))
+                .author_id(author_id)
+                .await;
 
-        if let Some(detail) = details.get(interaction.data.custom_id.as_str()) {
-            let detail_embed = serenity::CreateEmbed::default()
-                .title("指令說明")
-                .description(detail.to_string())
-                .colour(serenity::Colour::FOOYOO);
-            let message = serenity::CreateInteractionResponseMessage::default()
-                .ephemeral(true)
-                .add_embed(detail_embed);
-            let response = serenity::CreateInteractionResponse::Message(message);
-            let _ = interaction.create_response(serenity_ctx, response).await;
+            let Some(interaction) = interaction else {
+                break;
+            };
+
+            if let Some(detail) = details_handle.get(interaction.data.custom_id.as_str()) {
+                let detail_embed = serenity::CreateEmbed::default()
+                    .title("指令說明")
+                    .description(detail.to_string())
+                    .colour(serenity::Colour::FOOYOO);
+                let message = serenity::CreateInteractionResponseMessage::default()
+                    .ephemeral(true)
+                    .add_embed(detail_embed);
+                let response = serenity::CreateInteractionResponse::Message(message);
+                let _ = interaction.create_response(&ctx_clone, response).await;
+            }
         }
-    }
+    });
 
     Ok(())
 }

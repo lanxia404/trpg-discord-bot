@@ -42,6 +42,7 @@ cargo run --release
 ### 日誌指令
 - `/log-stream <on|off> [頻道]` - 控制日誌串流開關
 - `/log-stream-mode <live|batch>` - 切換串流模式
+- `/crit <success|fail> [頻道]` - 設定大成功/大失敗紀錄頻道
 
 ### 管理指令
 - `/admin restart` - 重啟機器人

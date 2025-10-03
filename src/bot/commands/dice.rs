@@ -3,6 +3,7 @@ use crate::models::types::RollResult;
 use crate::utils::coc::{determine_success_level, format_success_level, roll_coc_multi};
 use crate::utils::dice::roll_multiple_dice;
 use poise::{CreateReply, serenity_prelude as serenity};
+use serenity::model::prelude::Mentionable;
 
 /// D&D 骰子指令 - 擲骰子
 #[poise::command(slash_command)]
@@ -22,6 +23,14 @@ pub async fn roll(
 
     match roll_multiple_dice(&expression, rules.max_dice_count, &rules) {
         Ok(results) => {
+            let guild_id = ctx.guild_id();
+            let author = ctx.author().clone();
+            let crit_events = if guild_id.is_some() {
+                collect_dnd_critical_events(&results, &expression, &author)
+            } else {
+                Vec::new()
+            };
+
             if results.len() == 1 {
                 send_embed(&ctx, "D&D 擲骰結果", format_roll_result(&results[0])).await?;
             } else {
@@ -31,6 +40,10 @@ pub async fn roll(
                     format_multiple_roll_results(&results),
                 )
                 .await?;
+            }
+
+            if let Some(guild_id) = guild_id {
+                log_critical_events(&ctx, guild_id, crit_events).await?;
             }
         }
         Err(e) => {
@@ -70,6 +83,13 @@ pub async fn coc(
 
     let times = times.unwrap_or(1);
     let results = roll_coc_multi(skill, times, &rules);
+    let guild_id = ctx.guild_id();
+    let author = ctx.author().clone();
+    let crit_events = if guild_id.is_some() {
+        collect_coc_critical_events(&results, skill, &rules, &author)
+    } else {
+        Vec::new()
+    };
 
     if results.len() == 1 {
         let result = &results[0];
@@ -120,6 +140,10 @@ pub async fn coc(
             ));
         }
         send_embed(&ctx, "CoC 7e 連續擲骰結果", message).await?;
+    }
+
+    if let Some(guild_id) = guild_id {
+        log_critical_events(&ctx, guild_id, crit_events).await?;
     }
 
     Ok(())
@@ -185,6 +209,136 @@ fn format_multiple_roll_results(results: &[RollResult]) -> String {
     }
 
     output
+}
+
+#[derive(Clone, Copy)]
+enum CriticalKind {
+    Success,
+    Fail,
+}
+
+fn collect_dnd_critical_events(
+    results: &[RollResult],
+    expression: &str,
+    author: &serenity::User,
+) -> Vec<(CriticalKind, String)> {
+    let mention = author.mention().to_string();
+    let multiple = results.len() > 1;
+    let mut events = Vec::new();
+
+    for (index, result) in results.iter().enumerate() {
+        let roll_values = result
+            .rolls
+            .iter()
+            .map(|value| value.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let prefix = if multiple {
+            format!("第 {} 次 ", index + 1)
+        } else {
+            String::new()
+        };
+
+        if result.is_critical_success {
+            events.push((
+                CriticalKind::Success,
+                format!(
+                    "{} 在 `/roll {}` {}擲出 [{}] = {}，觸發大成功",
+                    mention, expression, prefix, roll_values, result.total
+                ),
+            ));
+        }
+        if result.is_critical_fail {
+            events.push((
+                CriticalKind::Fail,
+                format!(
+                    "{} 在 `/roll {}` {}擲出 [{}] = {}，觸發大失敗",
+                    mention, expression, prefix, roll_values, result.total
+                ),
+            ));
+        }
+    }
+
+    events
+}
+
+fn collect_coc_critical_events(
+    results: &[RollResult],
+    skill: u8,
+    rules: &crate::models::types::CoCRules,
+    author: &serenity::User,
+) -> Vec<(CriticalKind, String)> {
+    let mention = author.mention().to_string();
+    let multiple = results.len() > 1;
+    let mut events = Vec::new();
+
+    for (index, result) in results.iter().enumerate() {
+        if !(result.is_critical_success || result.is_critical_fail) {
+            continue;
+        }
+
+        let prefix = if multiple {
+            format!("第 {} 次 ", index + 1)
+        } else {
+            String::new()
+        };
+        let success_level = determine_success_level(result.total as u16, skill, rules);
+        let success_text = format_success_level(success_level);
+        let base = format!(
+            "{} 在 `/coc {}` {}擲出 {} ({})",
+            mention, skill, prefix, result.rolls[0], success_text
+        );
+
+        if result.is_critical_success {
+            events.push((CriticalKind::Success, format!("{}，觸發大成功", base)));
+        }
+        if result.is_critical_fail {
+            events.push((CriticalKind::Fail, format!("{}，觸發大失敗", base)));
+        }
+    }
+
+    events
+}
+
+async fn log_critical_events(
+    ctx: &Context<'_>,
+    guild_id: serenity::GuildId,
+    events: Vec<(CriticalKind, String)>,
+) -> Result<(), Error> {
+    if events.is_empty() {
+        return Ok(());
+    }
+
+    let (success_channel, fail_channel) = {
+        let data = ctx.data();
+        let manager = data.config.lock().await;
+        let cfg = manager.get_guild_config(guild_id.get());
+        (cfg.crit_success_channel, cfg.crit_fail_channel)
+    };
+
+    let http = &ctx.serenity_context().http;
+    for (kind, content) in events {
+        let (channel_id, title, colour) = match kind {
+            CriticalKind::Success => (success_channel, "大成功紀錄", serenity::Colour::DARK_GREEN),
+            CriticalKind::Fail => (fail_channel, "大失敗紀錄", serenity::Colour::DARK_RED),
+        };
+
+        let Some(channel_id) = channel_id else {
+            continue;
+        };
+        let channel = serenity::ChannelId::new(channel_id);
+        let embed = serenity::CreateEmbed::default()
+            .title(title)
+            .description(content.clone())
+            .colour(colour);
+        let builder = serenity::CreateMessage::new().embed(embed);
+
+        if let Err(err) = channel.send_message(http, builder).await {
+            eprintln!("發送關鍵紀錄失敗: {:?}", err);
+        }
+    }
+
+    Ok(())
 }
 
 async fn send_embed(
