@@ -1,108 +1,84 @@
-use serenity::all::{CommandOptionType, CreateCommand, CreateCommandOption, Context};
-use serenity::model::prelude::CommandDataOption;
-use crate::utils::config::ConfigManager;
+use crate::bot::{Context, Error};
+use poise::ChoiceParameter;
+use poise::serenity_prelude as serenity;
 
-pub async fn register_admin_command() -> CreateCommand {
-    CreateCommand::new("admin")
-        .description("管理指令")
-        .add_option(CreateCommandOption::new(
-            CommandOptionType::String,
-            "action",
-            "管理操作",
-        )
-        .add_string_choice("restart", "restart")
-        .add_string_choice("dev-add", "dev-add")
-        .add_string_choice("dev-remove", "dev-remove")
-        .add_string_choice("dev-list", "dev-list")
-        .required(true))
-        .add_option(CreateCommandOption::new(
-            CommandOptionType::User,
-            "user",
-            "要添加或移除的開發者",
-        ))
+#[derive(Clone, Copy, Debug, ChoiceParameter)]
+pub enum AdminAction {
+    #[name = "restart"]
+    Restart,
+    #[name = "dev-add"]
+    DevAdd,
+    #[name = "dev-remove"]
+    DevRemove,
+    #[name = "dev-list"]
+    DevList,
 }
 
-pub async fn handle_admin_command(
-    _ctx: &Context,
-    mut command_options: Vec<CommandDataOption>,
-    config_manager: &mut ConfigManager,
-    user_id: u64,
-) -> String {
-    if command_options.is_empty() {
-        return "請指定操作".to_string();
-    }
-    
-    let action_option = command_options.remove(0);
-    let action = if let serenity::all::CommandDataOptionValue::String(act) = action_option.value {
-        act.to_lowercase()
-    } else {
-        return "操作必須是字串".to_string();
-    };
+/// 管理指令
+#[poise::command(slash_command)]
+pub async fn admin(
+    ctx: Context<'_>,
+    #[description = "管理操作"] action: AdminAction,
+    #[description = "要添加或移除的開發者"] user: Option<serenity::User>,
+) -> Result<(), Error> {
+    let caller_id = ctx.author().id.get();
 
-    // Check if user is a developer
-    if !config_manager.is_developer(user_id) {
-        return "您沒有權限執行此操作！".to_string();
+    let mut config_manager = ctx.data().config.lock().await;
+    if !config_manager.is_developer(caller_id) {
+        ctx.say("您沒有權限執行此操作！").await?;
+        return Ok(());
     }
 
-    match action.as_str() {
-        "restart" => {
-            // In a real implementation, we would handle the restart logic here
-            // For now, we just return a message
-            "機器人重啟功能已觸發（實際上不會重啟）".to_string()
-        },
-        "dev-add" => {
-            if command_options.is_empty() {
-                return "請指定要添加的用戶！".to_string();
-            }
-            
-            let user_option = command_options.remove(0);
-            let user_id_value = if let serenity::all::CommandDataOptionValue::User(user_id) = user_option.value {
-                user_id
-            } else {
-                return "參數必須是用戶".to_string();
+    match action {
+        AdminAction::Restart => {
+            ctx.say("機器人重啟功能已觸發（實際上不會重啟）").await?;
+        }
+        AdminAction::DevAdd => {
+            let user = match user {
+                Some(u) => u,
+                None => {
+                    ctx.say("請指定要添加的用戶！").await?;
+                    return Ok(());
+                }
             };
-                
-            config_manager.add_developer(user_id_value.get());
-            
-            if let Err(e) = config_manager.save_config() {
-                return format!("開發者列表保存失敗: {}", e);
-            }
-            
-            format!("用戶 <@{}> 已添加到開發者列表", user_id_value.get())
-        },
-        "dev-remove" => {
-            if command_options.is_empty() {
-                return "請指定要移除的用戶！".to_string();
-            }
-            
-            let user_option = command_options.remove(0);
-            let user_id_value = if let serenity::all::CommandDataOptionValue::User(user_id) = user_option.value {
-                user_id
+
+            if config_manager.add_developer(user.id.get())? {
+                ctx.say(format!("用戶 <@{}> 已添加到開發者列表", user.id))
+                    .await?;
             } else {
-                return "參數必須是用戶".to_string();
-            };
-                
-            config_manager.remove_developer(user_id_value.get());
-            
-            if let Err(e) = config_manager.save_config() {
-                return format!("開發者列表保存失敗: {}", e);
+                ctx.say(format!("用戶 <@{}> 已經是開發者", user.id)).await?;
             }
-            
-            format!("用戶 <@{}> 已從開發者列表移除", user_id_value.get())
-        },
-        "dev-list" => {
+        }
+        AdminAction::DevRemove => {
+            let user = match user {
+                Some(u) => u,
+                None => {
+                    ctx.say("請指定要移除的用戶！").await?;
+                    return Ok(());
+                }
+            };
+
+            if config_manager.remove_developer(user.id.get())? {
+                ctx.say(format!("用戶 <@{}> 已從開發者列表移除", user.id))
+                    .await?;
+            } else {
+                ctx.say(format!("用戶 <@{}> 不在開發者列表中", user.id))
+                    .await?;
+            }
+        }
+        AdminAction::DevList => {
             let developers = &config_manager.global.developers;
             if developers.is_empty() {
-                "目前沒有開發者".to_string()
+                ctx.say("目前沒有開發者").await?;
             } else {
-                let mut list = "開發者列表:\n".to_string();
+                let mut list = String::from("開發者列表:\n");
                 for dev_id in developers {
-                    // In a real implementation, we would fetch user names
                     list.push_str(&format!("<@{}>\n", dev_id));
                 }
-                list
+                ctx.say(list).await?;
             }
-        },
-        _ => "無效的管理操作！".to_string(),
+        }
     }
+
+    Ok(())
 }

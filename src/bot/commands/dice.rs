@@ -1,105 +1,99 @@
-use serenity::all::{CommandOptionType, CreateCommand, CreateCommandOption, Context};
-use serenity::model::prelude::CommandDataOption;
-use crate::utils::dice::roll_multiple_dice;
-use crate::utils::coc::{roll_coc, format_success_level};
-use crate::utils::config::ConfigManager;
+use crate::bot::{Context, Error};
 use crate::models::types::RollResult;
+use crate::utils::coc::{determine_success_level, format_success_level, roll_coc};
+use crate::utils::dice::roll_multiple_dice;
 
-pub async fn register_dice_command() -> CreateCommand {
-    CreateCommand::new("roll")
-        .description("D&D 骰子指令 - 擲骰子")
-        .add_option(CreateCommandOption::new(
-            CommandOptionType::String,
-            "expression",
-            "骰子表達式 (例如: 2d20+5, d10, 1d6>=15)",
-        ).required(true))
-}
-
-pub async fn register_coc_command() -> CreateCommand {
-    CreateCommand::new("coc")
-        .description("CoC 7e 闇黑咆哮指令")
-        .add_option(CreateCommandOption::new(
-            CommandOptionType::Integer,
-            "skill",
-            "技能值 (1-100)",
-        ).required(true))
-}
-
-pub async fn handle_dice_command(
-    _ctx: &Context,
-    mut command_options: Vec<CommandDataOption>,
-    _config_manager: &ConfigManager,
-) -> String {
-    if command_options.is_empty() {
-        return "請提供骰子表達式".to_string();
-    }
-    
-    let option = command_options.remove(0);
-    let expression = if let serenity::all::CommandDataOptionValue::String(expr) = option.value {
-        expr
-    } else {
-        return "骰子表達式必須是字串".to_string();
+/// D&D 骰子指令 - 擲骰子
+#[poise::command(slash_command)]
+pub async fn roll(
+    ctx: Context<'_>,
+    #[description = "骰子表達式 (例如: 2d20+5, d10, 1d6>=15)"] expression: String,
+) -> Result<(), Error> {
+    let rules = {
+        let data = ctx.data();
+        let config_handle = data.config.lock().await;
+        let guild_id = ctx.guild_id().map(|id| id.get());
+        let guild_config = guild_id
+            .map(|id| config_handle.get_guild_config(id))
+            .unwrap_or_default();
+        guild_config.dnd_rules
     };
 
-    match roll_multiple_dice(&expression, 50) {
+    match roll_multiple_dice(&expression, rules.max_dice_count, &rules) {
         Ok(results) => {
             if results.len() == 1 {
-                format_roll_result(&results[0])
+                ctx.say(format_roll_result(&results[0])).await?;
             } else {
-                format_multiple_roll_results(&results)
+                ctx.say(format_multiple_roll_results(&results)).await?;
             }
-        },
-        Err(e) => format!("錯誤: {}", e),
+        }
+        Err(e) => {
+            ctx.say(format!("錯誤: {}", e)).await?;
+        }
     }
+
+    Ok(())
 }
 
-pub async fn handle_coc_command(
-    _ctx: &Context,
-    mut command_options: Vec<CommandDataOption>,
-    config_manager: &ConfigManager,
-) -> String {
-    if command_options.is_empty() {
-        return "請提供技能值".to_string();
-    }
-    
-    let option = command_options.remove(0);
-    let skill_value = if let serenity::all::CommandDataOptionValue::Integer(skill) = option.value {
-        skill as u8
-    } else {
-        return "技能值必須是整數".to_string();
+/// CoC 7e 闇黑咆哮指令
+#[poise::command(slash_command)]
+pub async fn coc(
+    ctx: Context<'_>,
+    #[description = "技能值 (1-100)"]
+    #[min = 1]
+    #[max = 100]
+    skill: u8,
+) -> Result<(), Error> {
+    let guild_id = match ctx.guild_id() {
+        Some(id) => id.get(),
+        None => {
+            ctx.say("此指令只能在伺服器中使用").await?;
+            return Ok(());
+        }
     };
 
-    if skill_value < 1 || skill_value > 100 {
-        return "技能值必須在 1-100 之間".to_string();
-    }
+    let rules = {
+        let data = ctx.data();
+        let config_handle = data.config.lock().await;
+        config_handle.get_guild_config(guild_id).coc_rules
+    };
 
-    let coc_rules = &config_manager.get_guild_config(0).coc_rules; // Use default rules for now
-    let result = roll_coc(skill_value, coc_rules);
-    
-    let success_level = crate::utils::coc::determine_success_level(result.total as u16, skill_value, coc_rules);
+    let result = roll_coc(skill, &rules);
+    let success_level = determine_success_level(result.total as u16, skill, &rules);
     let success_text = format_success_level(success_level);
 
-    format!(
-        "🎯 CoC 7e 擲骰\n技能值: {}\n骰子結果: {}\n判定結果: {}\n{}", 
-        skill_value,
+    ctx.say(format!(
+        "🎯 CoC 7e 擲骰\n技能值: {}\n骰子結果: {}\n判定結果: {}{}",
+        skill,
         result.rolls[0],
         success_text,
-        if result.is_critical_success { " ✨ 大成功!" } else if result.is_critical_fail { " 💥 大失敗!" } else { "" }
-    )
+        if result.is_critical_success {
+            " ✨ 大成功!"
+        } else if result.is_critical_fail {
+            " 💥 大失敗!"
+        } else {
+            ""
+        }
+    ))
+    .await?;
+
+    Ok(())
 }
 
 fn format_roll_result(result: &RollResult) -> String {
-    let rolls_str = result.rolls.iter()
+    let rolls_str = result
+        .rolls
+        .iter()
         .map(|r| r.to_string())
         .collect::<Vec<String>>()
         .join(" + ");
-    
+
     let total_with_mod = if result.modifier != 0 {
         format!("({}) + {} = {}", rolls_str, result.modifier, result.total)
     } else {
         format!("{} = {}", rolls_str, result.total)
     };
-    
+
     let crit_info = if result.is_critical_success {
         " ✨ 大成功!"
     } else if result.is_critical_fail {
@@ -107,33 +101,43 @@ fn format_roll_result(result: &RollResult) -> String {
     } else {
         ""
     };
-    
+
     let comparison_info = match result.comparison_result {
         Some(true) => "✅ 成功 ",
         Some(false) => "❌ 失敗 ",
         None => "",
     };
-    
-    format!("🎲 D&D 擲骰: {} = {}{}{}", result.dice_expr, total_with_mod, crit_info, comparison_info)
+
+    format!(
+        "🎲 D&D 擲骰: {} = {}{}{}",
+        result.dice_expr, total_with_mod, crit_info, comparison_info
+    )
 }
 
 fn format_multiple_roll_results(results: &[RollResult]) -> String {
-    let mut output = "🎲 連續擲骰結果:\n".to_string();
-    
+    let mut output = String::from("🎲 連續擲骰結果:\n");
+
     for (i, result) in results.iter().enumerate() {
-        let rolls_str = result.rolls.iter()
+        let rolls_str = result
+            .rolls
+            .iter()
             .map(|r| r.to_string())
             .collect::<Vec<String>>()
             .join(" + ");
-        
+
         let total_with_mod = if result.modifier != 0 {
             format!("({}) + {} = {}", rolls_str, result.modifier, result.total)
         } else {
             format!("{} = {}", rolls_str, result.total)
         };
-        
-        output.push_str(&format!("{}. {} = {}\n", i + 1, result.dice_expr, total_with_mod));
+
+        output.push_str(&format!(
+            "{}. {} = {}\n",
+            i + 1,
+            result.dice_expr,
+            total_with_mod
+        ));
     }
-    
+
     output
 }

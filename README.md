@@ -12,9 +12,9 @@
 ## 技術特點
 
 - 使用 Rust 編程語言確保內存安全和高性能
-- 基於 Serenity 框架構建
+- 基於 [poise](https://github.com/serenity-rs/poise) 框架構建，提供現代化的 Slash 指令體驗
 - 模塊化設計便於擴展
-- 支持指令前綴 `rpg!`
+- 透過 `.env` 管理敏感設定，並內建 JSON 配置持久化
 
 ## 編譯和運行
 
@@ -36,32 +36,30 @@ cargo run --release
 ## 指令列表
 
 ### 擲骰指令
-- `rpg!dnd <骰子表達式>` - D&D 擲骰
-- `rpg!roll <骰子表達式>` - 通用擲骰
-- `rpg!cc <技能值>` - CoC 7e 擲骰
+- `/roll <骰子表達式>` - D&D 擲骰
+- `/coc <技能值>` - CoC 7e 擲骰
 
 ### 日誌指令
-- `rpg!log stream <set/off/mode/throttle> [...]` - 配置日誌串流
-- `rpg!log level <INFO|DEBUG|WARN|ERROR>` - 設置日誌級別
-- `rpg!log crit <set/off> [...]` - 設置大成功/大失敗記錄頻道
+- `/log-stream <on|off> [頻道]` - 控制日誌串流開關
+- `/log-stream-mode <live|batch>` - 切換串流模式
 
 ### 管理指令
-- `rpg!admin restart` - 重啟機器人
-- `rpg!admin dev <add/remove/list> [...]` - 管理開發者
-- `rpg!admin rcfg <mode/service/show> [...]` - 配置重啟設置
-- `rpg!admin gstream` - 全局串流設置
+- `/admin restart` - 重啟機器人
+- `/admin dev-add <用戶>` - 添加開發者
+- `/admin dev-remove <用戶>` - 移除開發者
+- `/admin dev-list` - 展示開發者列表
 
 ### 幫助指令
-- `rpg!help` - 顯示幫助信息
+- `/help [summary|detailed]` - 顯示簡表或完整說明
 
 ## 當前狀態
 
-機器人功能完整且可正常運行。編譯時會產生棄用警告，這是因為項目使用了 Serenity 庫的 StandardFramework，該框架在 0.12.x 版本中被標記為棄用，並會在 0.13 版本中移除。
+機器人功能完整且可正常運行。
 
 ## 未來計劃
 
-1. **遷移到 Poise 框架**：計劃將項目遷移到推薦的 [poise](https://github.com/serenity-rs/poise) 框架，以消除棄用警告並獲得更好的功能支持。
-2. **功能擴展**：添加更多 TRPG 系統支持。
+1. **更多指令與系統支援**：擴充更多 TRPG 系統與自訂化功能。
+2. **測試補強**：加入整合測試確保核心指令穩定性。
 3. **性能優化**：進一步優化資源使用。
 
 ## 貢獻

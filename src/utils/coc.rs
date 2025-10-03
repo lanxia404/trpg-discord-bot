@@ -4,12 +4,12 @@ use rand::Rng;
 /// Roll for Call of Cthulhu 7th edition
 pub fn roll_coc(skill_value: u8, rules: &CoCRules) -> RollResult {
     let roll = rand::thread_rng().gen_range(1..=100);
-    
+
     let success_level = determine_success_level(roll, skill_value, rules);
-    
+
     let is_critical_success = roll == rules.critical_success as u16; // Usually 1
     let is_critical_fail = is_critical_failure(roll, skill_value, rules);
-    
+
     RollResult {
         dice_expr: format!("d100<={}", skill_value),
         rolls: vec![roll],
@@ -17,7 +17,7 @@ pub fn roll_coc(skill_value: u8, rules: &CoCRules) -> RollResult {
         total: roll as i32,
         is_critical_success,
         is_critical_fail,
-        comparison_result: Some(success_level <= 3), // Success if <= 3 (regular success, hard success, extreme success, critical success)
+        comparison_result: Some(success_level <= 4),
     }
 }
 
@@ -27,14 +27,14 @@ pub fn determine_success_level(roll: u16, skill_value: u8, rules: &CoCRules) -> 
     if roll == rules.critical_success as u16 {
         return 1; // Critical success
     }
-    
+
     if is_critical_failure(roll, skill_value, rules) {
         return 6; // Critical failure
     }
-    
+
     let hard_success_threshold = skill_value as f32 / rules.skill_divisor_hard as f32;
     let extreme_success_threshold = skill_value as f32 / rules.skill_divisor_extreme as f32;
-    
+
     if roll == 100 || roll <= extreme_success_threshold as u16 {
         2 // Extreme success
     } else if roll <= hard_success_threshold as u16 {

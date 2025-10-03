@@ -1,53 +1,64 @@
-use serenity::all::{CreateCommand, Context};
-use serenity::model::prelude::CommandDataOption;
-use crate::utils::config::ConfigManager;
+use crate::bot::{Context, Error};
+use poise::ChoiceParameter;
 
-pub async fn register_help_command() -> CreateCommand {
-    CreateCommand::new("help")
-        .description("顯示說明資訊")
+#[derive(Clone, Copy, Debug, ChoiceParameter)]
+pub enum HelpMode {
+    #[name = "summary"]
+    Summary,
+    #[name = "detailed"]
+    Detailed,
 }
 
-pub async fn handle_help_command(
-    _ctx: &Context,
-    _command_options: Vec<CommandDataOption>,
-    _config_manager: &ConfigManager,
-) -> String {
-    "
-# TRPG Discord 機器人說明
+/// 顯示指令快速說明
+#[poise::command(slash_command)]
+pub async fn help(
+    ctx: Context<'_>,
+    #[description = "顯示模式"] mode: Option<HelpMode>,
+) -> Result<(), Error> {
+    match mode.unwrap_or(HelpMode::Summary) {
+        HelpMode::Summary => {
+            ctx.say(
+                "TRPG Discord Bot 指令速覽:\n\
+\n\
+/roll <表達式> — 擲 D&D 骰子，支援比較與批次擲骰。\n\
+/coc <技能值> — CoC 7e 判定並顯示成功等級。\n\
+/log-stream <on|off> [頻道] — 控制日誌串流開關。\n\
+/log-stream-mode <live|batch> — 切換串流輸出模式。\n\
+/admin <restart|dev-add|dev-remove|dev-list> — 開發者專用管理指令。\n\
+/help [summary|detailed] — 顯示這份簡表或詳細版。",
+            )
+            .await?;
+        }
+        HelpMode::Detailed => {
+            ctx.say(
+                r#"
+# TRPG Discord Bot 說明
 
-## 擲骰指令
-- `/roll <骰子表達式>` - D&D 骰子指令
-  - 例如: `2d20+5`, `d10`, `1d6>=15`
-  - 支援連續擲骰: `+3 d6` (擲3次d6)
-  
-- `/coc <技能值>` - CoC 7e 闇黑咆哮指令
-  - 例如: `/coc 65` (技能值65的判定)
+## 擲骰
+- `/roll <骰子表達式>`：一般 D&D 擲骰，支援：
+  - 數量/面數：`2d6`、`d20`
+  - 修正值：`1d20+5`
+  - 比較：`1d10>=15`
+  - 批次：`+3 d6`（連續擲 3 次）
+- `/coc <技能值>`：CoC 7e 判定，自動回報成功等級、極限/困難成功與大成/失敗。
 
-## 日誌指令
-- `/log-stream-set <頻道>` - 設定日誌串流頻道
-- `/log-stream-off` - 關閉日誌串流
-- `/log-stream-mode <模式>` - 設定串流模式 (live/batch)
+## 日誌控制
+- `/log-stream on <頻道>`：啟用串流並綁定文字頻道。
+- `/log-stream off`：關閉串流輸出。
+- `/log-stream-mode <live|batch>`：切換即時或批次模式。
 
-## 管理指令 (僅開發者)
-- `/admin restart` - 重啟機器人
-- `/admin dev-add <用戶>` - 添加開發者
-- `/admin dev-remove <用戶>` - 移除開發者
-- `/admin dev-list` - 列出開發者
+## 管理（僅開發者）
+- `/admin restart`：發出重啟指令（目前為提示）。
+- `/admin dev-add <用戶>` / `/admin dev-remove <用戶>`：維護開發者名單。
+- `/admin dev-list`：列出所有已註冊開發者。
 
-## 其他指令
-- `/help` - 顯示此說明
+## 其他
+- `/help [summary|detailed]`：切換本說明的摘要或完整內容。
+                "#,
+            )
+            .await?;
+        }
+    }
 
-### D&D 骰子系統
-支援常見的骰子表達式格式：
-- `2d6` - 擲2顆6面骰
-- `d20+5` - 擲1顆20面骰+5
-- `1d10>=15` - 擲1顆10面骰，與15比較
-
-### CoC 7e 闇黑咆哮系統
-- 大成功: 骰出1
-- 極限成功: 骰出 ≤ 技能值/5
-- 困難成功: 骰出 ≤ 技能值/2
-- 普通成功: 骰出 ≤ 技能值
-- 大失敗: 技能<50時96-100，技能≥50時100
-    ".to_string()
+    Ok(())
 }

@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlobalConfig {
     pub developers: Vec<u64>,
@@ -55,10 +54,10 @@ pub enum StreamMode {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DnDRules {
-    pub critical_success: u8,    // usually 20
-    pub critical_fail: u8,       // usually 1
-    pub max_dice_count: u8,      // max dices in one roll
-    pub max_dice_sides: u16,     // max sides on a dice
+    pub critical_success: u8, // usually 20
+    pub critical_fail: u8,    // usually 1
+    pub max_dice_count: u8,   // max dices in one roll
+    pub max_dice_sides: u16,  // max sides on a dice
 }
 
 impl Default for DnDRules {
@@ -74,9 +73,9 @@ impl Default for DnDRules {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CoCRules {
-    pub critical_success: u8,    // usually 1
-    pub critical_fail: u8,       // usually 100
-    pub skill_divisor_hard: u8,  // usually 2 (hard success is skill/2)
+    pub critical_success: u8,      // usually 1
+    pub critical_fail: u8,         // usually 100
+    pub skill_divisor_hard: u8,    // usually 2 (hard success is skill/2)
     pub skill_divisor_extreme: u8, // usually 5 (extreme success is skill/5)
 }
 

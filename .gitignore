@@ -27,3 +27,8 @@ target
 
 # Qwen Code related files
 QWEN.md
+
+# Local environment and runtime artifacts
+.env
+config.json
+*.log

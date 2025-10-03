@@ -1,112 +1,100 @@
-use serenity::all::{CommandOptionType, CreateCommand, CreateCommandOption, Context};
-use serenity::model::prelude::CommandDataOption;
-use crate::utils::config::ConfigManager;
+use crate::bot::{Context, Error};
+use crate::models::types::StreamMode;
+use poise::ChoiceParameter;
+use poise::serenity_prelude as serenity;
 
-pub async fn register_log_stream_set_command() -> CreateCommand {
-    CreateCommand::new("log-stream-set")
-        .description("設定日誌串流頻道")
-        .add_option(CreateCommandOption::new(
-            CommandOptionType::Channel,
-            "channel",
-            "要設定為日誌串流的頻道",
-        ).required(true))
+#[derive(Clone, Copy, Debug, ChoiceParameter)]
+pub enum StreamToggle {
+    #[name = "on"]
+    On,
+    #[name = "off"]
+    Off,
 }
 
-pub async fn register_log_stream_off_command() -> CreateCommand {
-    CreateCommand::new("log-stream-off")
-        .description("關閉日誌串流")
+#[derive(Clone, Copy, Debug, ChoiceParameter)]
+pub enum StreamModeChoice {
+    #[name = "live"]
+    Live,
+    #[name = "batch"]
+    Batch,
 }
 
-pub async fn register_log_stream_mode_command() -> CreateCommand {
-    CreateCommand::new("log-stream-mode")
-        .description("設定串流模式")
-        .add_option(CreateCommandOption::new(
-            CommandOptionType::String,
-            "mode",
-            "串流模式 (live 或 batch)",
-        ).add_string_choice("live", "live")
-         .add_string_choice("batch", "batch")
-         .required(true))
-}
-
-pub async fn handle_log_stream_set_command(
-    _ctx: &Context,
-    mut command_options: Vec<CommandDataOption>,
-    config_manager: &mut ConfigManager,
-    guild_id: u64,
-) -> String {
-    if command_options.is_empty() {
-        return "請提供頻道".to_string();
+impl From<StreamModeChoice> for StreamMode {
+    fn from(choice: StreamModeChoice) -> Self {
+        match choice {
+            StreamModeChoice::Live => StreamMode::Live,
+            StreamModeChoice::Batch => StreamMode::Batch,
+        }
     }
-    
-    let option = command_options.remove(0);
-    let channel_id = if let serenity::all::CommandDataOptionValue::Channel(channel) = option.value {
-        channel
-    } else {
-        return "參數必須是頻道".to_string();
+}
+
+/// 控制日誌串流開關
+#[poise::command(slash_command)]
+pub async fn log_stream(
+    ctx: Context<'_>,
+    #[description = "開關狀態"] state: StreamToggle,
+    #[description = "當 state=on 時指定串流頻道"]
+    #[channel_types("Text")]
+    channel: Option<serenity::ChannelId>,
+) -> Result<(), Error> {
+    let guild_id = match ctx.guild_id() {
+        Some(id) => id.get(),
+        None => {
+            ctx.say("此指令只能在伺服器中使用").await?;
+            return Ok(());
+        }
     };
 
+    let mut config_manager = ctx.data().config.lock().await;
     let mut guild_config = config_manager.get_guild_config(guild_id);
-    guild_config.log_channel = Some(channel_id.get());
-    config_manager.set_guild_config(guild_id, guild_config);
-    
-    // Save the updated config
-    if let Err(e) = config_manager.save_config() {
-        return format!("設定保存失敗: {}", e);
+
+    match state {
+        StreamToggle::On => {
+            let channel = match channel {
+                Some(ch) => ch,
+                None => {
+                    ctx.say("請提供要啟用串流的文字頻道").await?;
+                    return Ok(());
+                }
+            };
+            guild_config.log_channel = Some(channel.get());
+            config_manager.set_guild_config(guild_id, guild_config)?;
+            ctx.say(format!("日誌串流已開啟，使用頻道: <#{}>", channel))
+                .await?;
+        }
+        StreamToggle::Off => {
+            guild_config.log_channel = None;
+            config_manager.set_guild_config(guild_id, guild_config)?;
+            ctx.say("日誌串流已關閉").await?;
+        }
     }
 
-    format!("日誌串流已設定到頻道: <#{}>", channel_id)
+    Ok(())
 }
 
-pub async fn handle_log_stream_off_command(
-    _ctx: &Context,
-    _command_options: Vec<CommandDataOption>,
-    config_manager: &mut ConfigManager,
-    guild_id: u64,
-) -> String {
-    let mut guild_config = config_manager.get_guild_config(guild_id);
-    guild_config.log_channel = None;
-    config_manager.set_guild_config(guild_id, guild_config);
-    
-    // Save the updated config
-    if let Err(e) = config_manager.save_config() {
-        return format!("設定保存失敗: {}", e);
-    }
-
-    "日誌串流已關閉".to_string()
-}
-
-pub async fn handle_log_stream_mode_command(
-    _ctx: &Context,
-    mut command_options: Vec<CommandDataOption>,
-    config_manager: &mut ConfigManager,
-    guild_id: u64,
-) -> String {
-    if command_options.is_empty() {
-        return "請提供模式".to_string();
-    }
-    
-    let option = command_options.remove(0);
-    let mode = if let serenity::all::CommandDataOptionValue::String(m) = option.value {
-        m
-    } else {
-        return "模式必須是字串".to_string();
+/// 設定日誌串流模式
+#[poise::command(slash_command)]
+pub async fn log_stream_mode(
+    ctx: Context<'_>,
+    #[description = "串流模式 (live 或 batch)"] mode: StreamModeChoice,
+) -> Result<(), Error> {
+    let guild_id = match ctx.guild_id() {
+        Some(id) => id.get(),
+        None => {
+            ctx.say("此指令只能在伺服器中使用").await?;
+            return Ok(());
+        }
     };
 
+    let mut config_manager = ctx.data().config.lock().await;
     let mut guild_config = config_manager.get_guild_config(guild_id);
-    
-    match mode.as_str() {
-        "live" => guild_config.stream_mode = crate::models::types::StreamMode::Live,
-        "batch" => guild_config.stream_mode = crate::models::types::StreamMode::Batch,
-        _ => return "無效的模式，請使用 'live' 或 'batch'".to_string(),
-    }
-    
-    config_manager.set_guild_config(guild_id, guild_config);
-    
-    // Save the updated config
-    if let Err(e) = config_manager.save_config() {
-        return format!("設定保存失敗: {}", e);
-    }
+    guild_config.stream_mode = mode.into();
+    config_manager.set_guild_config(guild_id, guild_config)?;
 
-    format!("串流模式已設定為: {}", mode)
+    let mode_text = match mode {
+        StreamModeChoice::Live => "live",
+        StreamModeChoice::Batch => "batch",
+    };
+    ctx.say(format!("串流模式已設定為: {}", mode_text)).await?;
+    Ok(())
 }
