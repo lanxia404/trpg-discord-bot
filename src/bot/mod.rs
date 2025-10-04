@@ -10,6 +10,8 @@ pub fn commands() -> Vec<poise::Command<data::BotData, Error>> {
         commands::dice::coc(),
         commands::logs::log_stream(),
         commands::logs::log_stream_mode(),
+        commands::logs::crit(),
+        commands::skills::skill(),
         commands::admin::admin(),
         commands::help::help(),
     ]
