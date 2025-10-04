@@ -26,7 +26,7 @@ pub async fn roll(
             let guild_id = ctx.guild_id();
             let author = ctx.author().clone();
             let crit_events = if guild_id.is_some() {
-                collect_dnd_critical_events(&results, &expression, &author)
+                collect_dnd_critical_events(&results, &expression, &author, ctx.channel_id())
             } else {
                 Vec::new()
             };
@@ -86,7 +86,7 @@ pub async fn coc(
     let guild_id = ctx.guild_id();
     let author = ctx.author().clone();
     let crit_events = if guild_id.is_some() {
-        collect_coc_critical_events(&results, skill, &rules, &author)
+        collect_coc_critical_events(&results, skill, &rules, &author, ctx.channel_id())
     } else {
         Vec::new()
     };
@@ -221,10 +221,12 @@ fn collect_dnd_critical_events(
     results: &[RollResult],
     expression: &str,
     author: &serenity::User,
+    channel: serenity::ChannelId,
 ) -> Vec<(CriticalKind, String)> {
     let mention = author.mention().to_string();
     let multiple = results.len() > 1;
     let mut events = Vec::new();
+    let channel_link = format!("<#{}>", channel);
 
     for (index, result) in results.iter().enumerate() {
         let roll_values = result
@@ -243,8 +245,8 @@ fn collect_dnd_critical_events(
             events.push((
                 CriticalKind::Success,
                 format!(
-                    "{} 在 `/roll {}` {}擲出 [{}] = {}，觸發大成功",
-                    mention, expression, prefix, roll_values, result.total
+                    "{} 在 `/roll {}` {}擲出 [{}] = {}，觸發大成功（頻道：{}）",
+                    mention, expression, prefix, roll_values, result.total, channel_link
                 ),
             ));
         }
@@ -252,8 +254,8 @@ fn collect_dnd_critical_events(
             events.push((
                 CriticalKind::Fail,
                 format!(
-                    "{} 在 `/roll {}` {}擲出 [{}] = {}，觸發大失敗",
-                    mention, expression, prefix, roll_values, result.total
+                    "{} 在 `/roll {}` {}擲出 [{}] = {}，觸發大失敗（頻道：{}）",
+                    mention, expression, prefix, roll_values, result.total, channel_link
                 ),
             ));
         }
@@ -267,10 +269,12 @@ fn collect_coc_critical_events(
     skill: u8,
     rules: &crate::models::types::CoCRules,
     author: &serenity::User,
+    channel: serenity::ChannelId,
 ) -> Vec<(CriticalKind, String)> {
     let mention = author.mention().to_string();
     let multiple = results.len() > 1;
     let mut events = Vec::new();
+    let channel_link = format!("<#{}>", channel);
 
     for (index, result) in results.iter().enumerate() {
         if !(result.is_critical_success || result.is_critical_fail) {
@@ -285,8 +289,8 @@ fn collect_coc_critical_events(
         let success_level = determine_success_level(result.total as u16, skill, rules);
         let success_text = format_success_level(success_level);
         let base = format!(
-            "{} 在 `/coc {}` {}擲出 {} ({})",
-            mention, skill, prefix, result.rolls[0], success_text
+            "{} 在 `/coc {}` {}擲出 {} ({})（頻道：{}）",
+            mention, skill, prefix, result.rolls[0], success_text, channel_link
         );
 
         if result.is_critical_success {

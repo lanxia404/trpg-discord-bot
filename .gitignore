@@ -32,3 +32,8 @@ QWEN.md
 .env
 config.json
 *.log*
+.vscode/
+
+# SQL database files
+*.sqlite
+*.db*

@@ -36,21 +36,34 @@ cargo run --release
 ## 指令列表
 
 ### 擲骰指令
+
 - `/roll <骰子表達式>` - D&D 擲骰
 - `/coc <技能值> [次數]` - CoC 7e 擲骰，支援 1-10 次連續判定
+- `/skill add <名稱> <類型> <等級> <效果>` - 新增或更新個人技能
+- `/skill show <名稱>` - 支援模糊搜尋技能名稱，查詢自己的技能
+- `/skill delete <名稱>` - 刪除此伺服器中符合的技能（含其他玩家），需要按鈕確認
 
 ### 日誌指令
+
 - `/log-stream <on|off> [頻道]` - 控制日誌串流開關
 - `/log-stream-mode <live|batch>` - 切換串流模式
-- `/crit <success|fail> [頻道]` - 設定大成功/大失敗紀錄頻道
+- `/crit <success|fail> [頻道]` - 設定大成功/大失敗紀錄頻道，紀錄訊息會標註觸發頻道
+
+### 資料庫
+
+- `Skills.session.sql` - SQLite schema 與範例查詢，可直接匯入到工具或以 `sqlite3` 執行建立 `skills` 資料表。
+- `Skills.mssql.sql` - SQL Server 版本的 `skills` 資料表與索引腳本。
 
 ### 管理指令
-- `/admin restart` - 重啟機器人
-- `/admin dev-add <用戶>` - 添加開發者
-- `/admin dev-remove <用戶>` - 移除開發者
+
+- `/admin restart` - 確認後重新啟動機器人
+- `/admin shutdown` - 確認後關閉機器人
+- `/admin dev-add <用戶>` - 添加開發者（需按鈕確認）
+- `/admin dev-remove <用戶>` - 移除開發者（需按鈕確認）
 - `/admin dev-list` - 展示開發者列表
 
 ### 幫助指令
+
 - `/help [summary|detailed]` - 顯示簡表或完整說明
 
 ## 當前狀態

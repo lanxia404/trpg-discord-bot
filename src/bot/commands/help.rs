@@ -14,7 +14,7 @@ pub async fn help(ctx: Context<'_>) -> Result<(), Error> {
     let embed = serenity::CreateEmbed::default()
         .title("TRPG Discord Bot 指令說明")
         .description(
-            "請點擊下方按鈕查看各指令的詳細說明。\n支援 `/roll`、`/coc`、`/log-stream`、`/log-stream-mode`、`/crit`、`/admin`。",
+            "請點擊下方按鈕查看各指令的詳細說明。\n支援 `/roll`、`/coc`、`/skill add`、`/skill show`、`/log-stream`、`/log-stream-mode`、`/crit`、`/admin`。",
         )
         .colour(serenity::Colour::FOOYOO);
 
@@ -24,6 +24,9 @@ pub async fn help(ctx: Context<'_>) -> Result<(), Error> {
             .style(serenity::ButtonStyle::Primary),
         CreateButton::new("help_coc")
             .label("CoC 擲骰")
+            .style(serenity::ButtonStyle::Primary),
+        CreateButton::new("help_skill")
+            .label("技能指令")
             .style(serenity::ButtonStyle::Primary),
         CreateButton::new("help_logs")
             .label("日誌指令")
@@ -54,7 +57,11 @@ pub async fn help(ctx: Context<'_>) -> Result<(), Error> {
     );
     details.insert(
         "help_admin",
-        "**管理指令（需開發者）**\n`/admin restart`：觸發重啟提示。\n`/admin dev-add <用戶>` / `/admin dev-remove <用戶>`：維護開發者名單。\n`/admin dev-list`：列出所有已註冊開發者。",
+        "**管理指令（需開發者）**\n`/admin restart`：確認後重新啟動機器人。\n`/admin shutdown`：確認後關閉機器人。\n`/admin dev-add <用戶>` / `/admin dev-remove <用戶>`：維護開發者名單。\n`/admin dev-list`：列出所有已註冊開發者。",
+    );
+    details.insert(
+        "help_skill",
+        "**技能指令**\n`/skill add <名稱> <類型> <等級> <效果>`：新增或更新個人技能紀錄。\n`/skill show <名稱>`：支援模糊搜尋技能名稱，查詢自己的技能。\n`/skill delete <名稱>`：刪除此伺服器中的技能（含其他玩家）。",
     );
 
     let details = Arc::new(details);
