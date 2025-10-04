@@ -54,7 +54,7 @@ pub async fn roll(
     Ok(())
 }
 
-/// CoC 7e 闇黑咆哮指令
+/// CoC 7e 指令
 #[poise::command(slash_command)]
 pub async fn coc(
     ctx: Context<'_>,

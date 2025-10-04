@@ -1,6 +1,6 @@
 # TRPG Discord Bot (Rust Version)
 
-這是一個用 Rust 編寫的 Discord 機器人，專為桌上角色扮演游戏(TRPG)設計。
+這是一個用 Rust 編寫的 Discord 機器人，專為TRPG設計。
 
 ## 功能特性
 
@@ -48,11 +48,6 @@ cargo run --release
 - `/log-stream <on|off> [頻道]` - 控制日誌串流開關
 - `/log-stream-mode <live|batch>` - 切換串流模式
 - `/crit <success|fail> [頻道]` - 設定大成功/大失敗紀錄頻道，紀錄訊息會標註觸發頻道
-
-### 資料庫
-
-- `Skills.session.sql` - SQLite schema 與範例查詢，可直接匯入到工具或以 `sqlite3` 執行建立 `skills` 資料表。
-- `Skills.mssql.sql` - SQL Server 版本的 `skills` 資料表與索引腳本。
 
 ### 管理指令
 
