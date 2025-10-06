@@ -8,7 +8,7 @@ use poise::{
 };
 use rand::random;
 use std::time::Duration;
-use tokio::time::sleep;
+use tokio::{process::Command as TokioCommand, time::sleep};
 
 #[derive(Clone, Copy, Debug, ChoiceParameter)]
 pub enum AdminAction {
@@ -48,15 +48,29 @@ pub async fn admin(
             if !confirm_action(&ctx, "確認執行重啟操作？").await? {
                 return Ok(());
             }
+            let control = match process_control_from_config(&ctx).await {
+                Ok(control) => control,
+                Err(msg) => {
+                    ctx.say(msg).await?;
+                    return Ok(());
+                }
+            };
             ctx.say("已確認，機器人即將重新啟動……").await?;
-            schedule_restart().await?;
+            schedule_restart(control).await?;
         }
         AdminAction::Shutdown => {
             if !confirm_action(&ctx, "確認關閉機器人？").await? {
                 return Ok(());
             }
+            let control = match process_control_from_config(&ctx).await {
+                Ok(control) => control,
+                Err(msg) => {
+                    ctx.say(msg).await?;
+                    return Ok(());
+                }
+            };
             ctx.say("已確認，機器人即將關閉……").await?;
-            schedule_shutdown().await?;
+            schedule_shutdown(control).await?;
         }
         AdminAction::DevAdd => {
             let user = match user {
@@ -183,19 +197,98 @@ async fn confirm_action(ctx: &Context<'_>, prompt: impl Into<String>) -> Result<
     }
 }
 
-async fn schedule_restart() -> Result<(), Error> {
-    tokio::spawn(async move {
-        sleep(Duration::from_millis(500)).await;
-        restart_process();
-    });
+#[derive(Clone)]
+enum ProcessControl {
+    Execv,
+    Service { name: String },
+}
+
+async fn process_control_from_config(ctx: &Context<'_>) -> Result<ProcessControl, String> {
+    let (mode, service) = {
+        let config = ctx.data().config.lock().await;
+        (
+            config.global.restart_mode.clone(),
+            config.global.restart_service.clone(),
+        )
+    };
+
+    match mode.as_str() {
+        "service" => {
+            let name = service
+                .ok_or_else(|| "未設定 global.restart_service，無法使用系統服務模式".to_string())?;
+            Ok(ProcessControl::Service { name })
+        }
+        _ => Ok(ProcessControl::Execv),
+    }
+}
+
+async fn schedule_restart(control: ProcessControl) -> Result<(), Error> {
+    match control {
+        ProcessControl::Execv => {
+            tokio::spawn(async move {
+                sleep(Duration::from_millis(500)).await;
+                restart_process();
+            });
+        }
+        ProcessControl::Service { name } => {
+            tokio::spawn(async move {
+                sleep(Duration::from_millis(500)).await;
+                match TokioCommand::new("systemctl")
+                    .arg("restart")
+                    .arg(&name)
+                    .status()
+                    .await
+                {
+                    Ok(status) if status.success() => std::process::exit(0),
+                    Ok(status) => {
+                        eprintln!(
+                            "systemctl restart {} 失敗，狀態碼 {:?}",
+                            name,
+                            status.code()
+                        );
+                        std::process::exit(status.code().unwrap_or(1));
+                    }
+                    Err(err) => {
+                        eprintln!("systemctl restart {} 執行失敗: {}", name, err);
+                        std::process::exit(1);
+                    }
+                }
+            });
+        }
+    }
     Ok(())
 }
 
-async fn schedule_shutdown() -> Result<(), Error> {
-    tokio::spawn(async {
-        sleep(Duration::from_millis(500)).await;
-        std::process::exit(0);
-    });
+async fn schedule_shutdown(control: ProcessControl) -> Result<(), Error> {
+    match control {
+        ProcessControl::Execv => {
+            tokio::spawn(async {
+                sleep(Duration::from_millis(500)).await;
+                std::process::exit(0);
+            });
+        }
+        ProcessControl::Service { name } => {
+            tokio::spawn(async move {
+                sleep(Duration::from_millis(500)).await;
+                match TokioCommand::new("systemctl")
+                    .arg("stop")
+                    .arg(&name)
+                    .status()
+                    .await
+                {
+                    Ok(status) if status.success() => std::process::exit(0),
+                    Ok(status) => {
+                        eprintln!("systemctl stop {} 失敗，狀態碼 {:?}", name, status.code());
+                        std::process::exit(status.code().unwrap_or(1));
+                    }
+                    Err(err) => {
+                        eprintln!("systemctl stop {} 執行失敗: {}", name, err);
+                        std::process::exit(1);
+                    }
+                }
+            });
+        }
+    }
     Ok(())
 }
 

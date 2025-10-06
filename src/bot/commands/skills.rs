@@ -94,16 +94,29 @@ pub async fn skill(
             let target = ctx.author().clone();
             let record = find_skill_for_user(&ctx, guild_id, &target, &name).await?;
 
+            let search_term = name.trim();
             let embed = match record {
-                Some(db_skill) => serenity::CreateEmbed::default()
-                    .title(format!("{} 的技能：{}", target.tag(), db_skill.name))
-                    .fields([
-                        ("類型", db_skill.skill_type, true),
-                        ("等級", db_skill.level, true),
-                        ("效果", db_skill.effect, false),
-                    ])
-                    .colour(serenity::Colour::BLURPLE),
+                Some(db_skill) => {
+                    let DbSkill {
+                        name,
+                        normalized_name: _,
+                        owner_id: _,
+                        skill_type,
+                        level,
+                        effect,
+                    } = db_skill;
+
+                    serenity::CreateEmbed::default()
+                        .title(format!("技能：<{}>", name))
+                        .fields([
+                            ("類型", skill_type, true),
+                            ("等級", level, true),
+                            ("效果", effect, false),
+                        ])
+                        .colour(serenity::Colour::BLURPLE)
+                }
                 None => serenity::CreateEmbed::default()
+                    .title(format!("技能：<{}>", search_term))
                     .colour(serenity::Colour::ORANGE)
                     .description(format!("找不到 {} 的技能 `{}`", target.mention(), name)),
             };
