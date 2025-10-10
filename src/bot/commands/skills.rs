@@ -239,7 +239,7 @@ async fn add_skill(
     level: &str,
     effect: &str,
 ) -> Result<(), Error> {
-    let db = ctx.data().db.clone();
+    let skills_db = ctx.data().skills_db.clone();
     let user_id = ctx.author().id.get();
     let normalized = name.to_lowercase();
     let name = name.to_string();
@@ -247,12 +247,12 @@ async fn add_skill(
     let level = level.to_string();
     let effect = effect.to_string();
 
-    db.call(move |conn| {
+    skills_db.call(move |conn| {
         conn.execute(
             "INSERT INTO skills (guild_id, user_id, name, normalized_name, skill_type, level, effect)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-             ON CONFLICT(guild_id, user_id, normalized_name)
-             DO UPDATE SET name=excluded.name, skill_type=excluded.skill_type, level=excluded.level, effect=excluded.effect",
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            ON CONFLICT(guild_id, user_id, normalized_name)
+            DO UPDATE SET name=excluded.name, skill_type=excluded.skill_type, level=excluded.level, effect=excluded.effect",
             params![
                 guild_id as i64,
                 user_id as i64,
@@ -276,24 +276,24 @@ async fn find_skill_for_user(
     user: &serenity::User,
     name: &str,
 ) -> Result<Option<DbSkill>, Error> {
-    let db = ctx.data().db.clone();
+    let skills_db = ctx.data().skills_db.clone();
     let guild_id_i64 = guild_id as i64;
     let user_id_i64 = user.id.get() as i64;
     let normalized = name.to_lowercase();
 
     let pattern = format!("%{}%", normalized);
 
-    let result = db
+    let result = skills_db
         .call(move |conn| -> DbResult<Option<DbSkill>> {
             let row = conn
                 .query_row(
                     "SELECT name, normalized_name, user_id, skill_type, level, effect
-                 FROM skills
-                 WHERE guild_id = ?1 AND user_id = ?2 AND normalized_name LIKE ?3
-                 ORDER BY CASE WHEN normalized_name = ?4 THEN 0 ELSE 1 END,
-                          ABS(LENGTH(normalized_name) - LENGTH(?4)),
-                          normalized_name
-                 LIMIT 1",
+                FROM skills
+                WHERE guild_id = ?1 AND user_id = ?2 AND normalized_name LIKE ?3
+                ORDER BY CASE WHEN normalized_name = ?4 THEN 0 ELSE 1 END,
+                        ABS(LENGTH(normalized_name) - LENGTH(?4)),
+                        normalized_name
+                LIMIT 1",
                     params![guild_id_i64, user_id_i64, pattern, normalized],
                     |row| {
                         Ok(DbSkill {
@@ -319,22 +319,22 @@ async fn find_skill_in_guild(
     guild_id: u64,
     name: &str,
 ) -> Result<Option<DbSkill>, Error> {
-    let db = ctx.data().db.clone();
+    let skills_db = ctx.data().skills_db.clone();
     let guild_id_i64 = guild_id as i64;
     let normalized = name.to_lowercase();
     let pattern = format!("%{}%", normalized);
 
-    let result = db
+    let result = skills_db
         .call(move |conn| -> DbResult<Option<DbSkill>> {
             let row = conn
                 .query_row(
                     "SELECT name, normalized_name, user_id, skill_type, level, effect
-                 FROM skills
-                 WHERE guild_id = ?1 AND normalized_name LIKE ?2
-                 ORDER BY CASE WHEN normalized_name = ?3 THEN 0 ELSE 1 END,
-                          ABS(LENGTH(normalized_name) - LENGTH(?3)),
-                          normalized_name
-                 LIMIT 1",
+                FROM skills
+                WHERE guild_id = ?1 AND normalized_name LIKE ?2
+                ORDER BY CASE WHEN normalized_name = ?3 THEN 0 ELSE 1 END,
+                        ABS(LENGTH(normalized_name) - LENGTH(?3)),
+                        normalized_name
+                LIMIT 1",
                     params![guild_id_i64, pattern, normalized],
                     |row| {
                         Ok(DbSkill {
@@ -361,15 +361,15 @@ async fn delete_skill(
     owner_id: u64,
     normalized_name: &str,
 ) -> Result<(), Error> {
-    let db = ctx.data().db.clone();
+    let skills_db = ctx.data().skills_db.clone();
     let guild_id_i64 = guild_id as i64;
     let user_id_i64 = owner_id as i64;
     let normalized = normalized_name.to_string();
 
-    db.call(move |conn| -> DbResult<()> {
+    skills_db.call(move |conn| -> DbResult<()> {
         conn.execute(
             "DELETE FROM skills
-             WHERE guild_id = ?1 AND user_id = ?2 AND normalized_name = ?3",
+            WHERE guild_id = ?1 AND user_id = ?2 AND normalized_name = ?3",
             params![guild_id_i64, user_id_i64, normalized],
         )?;
         Ok(())
