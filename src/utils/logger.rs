@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use thiserror::Error;
 
-const MAX_LOG_SIZE: u64 = 1 * 1024 * 1024; // 1 MiB per log file
+const MAX_LOG_SIZE: u64 = 1024 * 1024; // 1 MiB per log file
 const MAX_LOG_BACKUPS: usize = 5;
 
 #[derive(Debug, Error)]
@@ -60,10 +60,10 @@ impl DiscordLogger {
         println!("{}", message);
         Self::ensure_capacity(state, message.len() + 1);
 
-        if let Some(file) = state.file.as_mut() {
-            if let Err(e) = writeln!(file, "{}", message) {
-                eprintln!("Failed to write log entry: {}", e);
-            }
+        if let Some(file) = state.file.as_mut()
+            && let Err(e) = writeln!(file, "{}", message)
+        {
+            eprintln!("Failed to write log entry: {}", e);
         }
     }
 
@@ -185,18 +185,17 @@ impl Log for DiscordLogger {
         let entry = format!("{}: {}", record.level(), message);
         let mut state = self.state.lock().expect("logger mutex poisoned");
 
-        if let Some(last) = &state.last_entry {
-            if last == &entry {
-                state.repeat_count = state.repeat_count.saturating_add(1);
+        if let Some(last) = &state.last_entry
+            && last == &entry
+        {
+            state.repeat_count = state.repeat_count.saturating_add(1);
 
-                if state.repeat_count >= SUPPRESS_THRESHOLD {
-                    let summary =
-                        format!("(previous message repeated {} times)", state.repeat_count);
-                    Self::write_message(&mut state, &summary);
-                    state.repeat_count = 0;
-                }
-                return;
+            if state.repeat_count >= SUPPRESS_THRESHOLD {
+                let summary = format!("(previous message repeated {} times)", state.repeat_count);
+                Self::write_message(&mut state, &summary);
+                state.repeat_count = 0;
             }
+            return;
         }
 
         Self::emit_repeat_summary(&mut state);

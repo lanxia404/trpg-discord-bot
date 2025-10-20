@@ -11,7 +11,7 @@ use rand::random;
 use std::ffi::OsString;
 use std::path::Path;
 use std::time::Duration;
-use tokio::time::sleep;
+use tokio::{process::Command as TokioCommand, time::sleep};
 
 #[derive(Clone, Copy, Debug, ChoiceParameter)]
 pub enum AdminAction {
@@ -51,6 +51,13 @@ pub async fn admin(
             if !confirm_action(&ctx, "確認執行重啟操作？").await? {
                 return Ok(());
             }
+            let control = match process_control_from_config(&ctx).await {
+                Ok(control) => control,
+                Err(msg) => {
+                    ctx.say(msg).await?;
+                    return Ok(());
+                }
+            };
             ctx.say("已確認，機器人即將重新啟動……").await?;
             let restart_settings = {
                 let config_manager = ctx.data().config.lock().await;
@@ -62,8 +69,15 @@ pub async fn admin(
             if !confirm_action(&ctx, "確認關閉機器人？").await? {
                 return Ok(());
             }
+            let control = match process_control_from_config(&ctx).await {
+                Ok(control) => control,
+                Err(msg) => {
+                    ctx.say(msg).await?;
+                    return Ok(());
+                }
+            };
             ctx.say("已確認，機器人即將關閉……").await?;
-            schedule_shutdown().await?;
+            schedule_shutdown(control).await?;
         }
         AdminAction::DevAdd => {
             let user = match user {
@@ -200,11 +214,36 @@ async fn schedule_restart(settings: RestartSettings) -> Result<(), Error> {
     Ok(())
 }
 
-async fn schedule_shutdown() -> Result<(), Error> {
-    tokio::spawn(async {
-        sleep(Duration::from_millis(500)).await;
-        std::process::exit(0);
-    });
+async fn schedule_shutdown(control: ProcessControl) -> Result<(), Error> {
+    match control {
+        ProcessControl::Execv => {
+            tokio::spawn(async {
+                sleep(Duration::from_millis(500)).await;
+                std::process::exit(0);
+            });
+        }
+        ProcessControl::Service { name } => {
+            tokio::spawn(async move {
+                sleep(Duration::from_millis(500)).await;
+                match TokioCommand::new("systemctl")
+                    .arg("stop")
+                    .arg(&name)
+                    .status()
+                    .await
+                {
+                    Ok(status) if status.success() => std::process::exit(0),
+                    Ok(status) => {
+                        eprintln!("systemctl stop {} 失敗，狀態碼 {:?}", name, status.code());
+                        std::process::exit(status.code().unwrap_or(1));
+                    }
+                    Err(err) => {
+                        eprintln!("systemctl stop {} 執行失敗: {}", name, err);
+                        std::process::exit(1);
+                    }
+                }
+            });
+        }
+    }
     Ok(())
 }
 

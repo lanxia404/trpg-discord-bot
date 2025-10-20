@@ -33,6 +33,22 @@ cargo build --release
 cargo run --release
 ```
 
+### 與系統服務整合
+
+若機器人以 systemd 等服務管理器啟動，可在 `config.json` 的 `global` 區段設定：
+
+```json
+{
+  "restart_mode": "service",
+  "restart_service": "trpg-bot"
+}
+```
+
+- `restart_mode`：`execv`（預設）會直接以原參數重新啟動程序；`service` 會透過 `systemctl restart/stop` 控制指定服務。
+- `restart_service`：當 `restart_mode` 為 `service` 時必填，為 systemd 服務名稱。
+
+完成設定後，`/admin restart` 與 `/admin shutdown` 將呼叫對應的 `systemctl restart/stop`，確保服務受系統管理。
+
 ## 指令列表
 
 ### 擲骰指令

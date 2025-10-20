@@ -27,10 +27,10 @@ async fn main() -> Result<(), bot::Error> {
         ConfigManager::new("config.json").map_err(|e| anyhow!("設定管理器初始化失敗: {}", e))?;
     let shared_config = Arc::new(Mutex::new(config_manager));
 
-    let db = tokio_rusqlite::Connection::open("skills.db")
+    let skills_db = tokio_rusqlite::Connection::open("skills.db")
         .await
-        .map_err(|e| anyhow!("開啟資料庫失敗: {}", e))?;
-    db.call(|conn| {
+        .map_err(|e| anyhow!("開啟技能資料庫失敗: {}", e))?;
+    skills_db.call(|conn| {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS skills (
                 guild_id INTEGER NOT NULL,
@@ -93,12 +93,30 @@ async fn main() -> Result<(), bot::Error> {
         Ok(())
     })
     .await
-    .map_err(|e| anyhow!("初始化資料庫失敗: {}", e))?;
+    .map_err(|e| anyhow!("初始化技能資料庫失敗: {}", e))?;
+
+    let base_settings_db = tokio_rusqlite::Connection::open("base_settings.db")
+        .await
+        .map_err(|e| anyhow!("開啟基本設定資料庫失敗: {}", e))?;
+    base_settings_db
+        .call(|conn| {
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS base_settings (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )",
+            [],
+            )?;
+            Ok(())
+        })
+        .await
+        .map_err(|e| anyhow!("初始化基本設定資料庫失敗: {}", e))?;
 
     let intents = serenity::GatewayIntents::GUILDS;
 
     let setup_config = Arc::clone(&shared_config);
-    let setup_db = db.clone();
+    let setup_skills_db = skills_db.clone();
+    let setup_base_settings_db = base_settings_db.clone();
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {
             commands: crate::bot::commands(),
@@ -106,11 +124,12 @@ async fn main() -> Result<(), bot::Error> {
         })
         .setup(move |ctx, ready, framework| {
             let config = Arc::clone(&setup_config);
-            let db = setup_db.clone();
+            let skills_db = setup_skills_db.clone();
+            let base_settings_db = setup_base_settings_db.clone();
             Box::pin(async move {
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
                 println!("{} 已經上線!", ready.user.name);
-                Ok(BotData { config, db })
+                Ok(BotData { config, skills_db, base_settings_db })
             })
         })
         .build();
