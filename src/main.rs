@@ -61,8 +61,8 @@ async fn main() -> Result<(), bot::Error> {
         if has_description {
             conn.execute_batch(
                 "BEGIN;
-                 DROP TABLE IF EXISTS skills_tmp;
-                 CREATE TABLE skills_tmp (
+                DROP TABLE IF EXISTS skills_tmp;
+                CREATE TABLE skills_tmp (
                     guild_id INTEGER NOT NULL,
                     user_id INTEGER NOT NULL,
                     name TEXT NOT NULL,
@@ -71,13 +71,13 @@ async fn main() -> Result<(), bot::Error> {
                     level TEXT NOT NULL,
                     effect TEXT NOT NULL,
                     UNIQUE(guild_id, user_id, normalized_name)
-                 );
-                 INSERT INTO skills_tmp (guild_id, user_id, name, normalized_name, skill_type, level, effect)
-                 SELECT guild_id, user_id, name, normalized_name, COALESCE(skill_type, ''), COALESCE(level, ''), COALESCE(effect, '')
-                 FROM skills;
-                 DROP TABLE skills;
-                 ALTER TABLE skills_tmp RENAME TO skills;
-                 COMMIT;",
+                );
+                INSERT INTO skills_tmp (guild_id, user_id, name, normalized_name, skill_type, level, effect)
+                SELECT guild_id, user_id, name, normalized_name, COALESCE(skill_type, ''), COALESCE(level, ''), COALESCE(effect, '')
+                FROM skills;
+                DROP TABLE skills;
+                ALTER TABLE skills_tmp RENAME TO skills;
+                COMMIT;",
             )?;
         } else {
             let _ = conn.execute(
