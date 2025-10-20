@@ -366,15 +366,16 @@ async fn delete_skill(
     let user_id_i64 = owner_id as i64;
     let normalized = normalized_name.to_string();
 
-    skills_db.call(move |conn| -> DbResult<()> {
-        conn.execute(
-            "DELETE FROM skills
+    skills_db
+        .call(move |conn| -> DbResult<()> {
+            conn.execute(
+                "DELETE FROM skills
             WHERE guild_id = ?1 AND user_id = ?2 AND normalized_name = ?3",
-            params![guild_id_i64, user_id_i64, normalized],
-        )?;
-        Ok(())
-    })
-    .await?;
+                params![guild_id_i64, user_id_i64, normalized],
+            )?;
+            Ok(())
+        })
+        .await?;
 
     Ok(())
 }

@@ -105,7 +105,7 @@ async fn main() -> Result<(), bot::Error> {
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             )",
-            [],
+                [],
             )?;
             Ok(())
         })
@@ -129,7 +129,11 @@ async fn main() -> Result<(), bot::Error> {
             Box::pin(async move {
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
                 println!("{} 已經上線!", ready.user.name);
-                Ok(BotData { config, skills_db, base_settings_db })
+                Ok(BotData {
+                    config,
+                    skills_db,
+                    base_settings_db,
+                })
             })
         })
         .build();
