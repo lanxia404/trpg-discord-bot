@@ -1,13 +1,13 @@
 use crate::bot::{Context, Error};
 use poise::{
-    ChoiceParameter, CreateReply,
     serenity_prelude::{
         self as serenity, ButtonStyle, CreateActionRow, CreateButton, CreateInteractionResponse,
         CreateInteractionResponseMessage, Mentionable,
     },
+    ChoiceParameter, CreateReply,
 };
 use std::time::Duration;
-use tokio_rusqlite::{OptionalExtension, Result as DbResult, params};
+use tokio_rusqlite::{params, OptionalExtension, Result as DbResult};
 
 #[derive(ChoiceParameter, Clone, Copy, Debug)]
 pub enum SkillAction {
