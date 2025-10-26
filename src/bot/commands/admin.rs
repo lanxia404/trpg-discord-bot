@@ -296,49 +296,48 @@ async fn schedule_restart(control: ProcessControl) -> Result<(), Error> {
 async fn schedule_shutdown(control: ProcessControl) -> Result<(), Error> {
     match control {
         ProcessControl::Execv => {
+            // 延遲後退出程序，讓響應能發送出去
             tokio::spawn(async {
                 sleep(Duration::from_millis(500)).await;
                 std::process::exit(0);
             });
         }
         ProcessControl::Service { name } => {
-            tokio::spawn(async move {
-                sleep(Duration::from_millis(500)).await;
-                #[cfg(target_family = "windows")]
+            // 在服務模式下，使用系統服務管理器關閉服務
+            #[cfg(target_family = "windows")]
+            {
+                match TokioCommand::new("sc")
+                    .args(["stop", &name])
+                    .status()
+                    .await
                 {
-                    match TokioCommand::new("sc")
-                        .args(["stop", &name])
-                        .status()
-                        .await
-                    {
-                        Ok(_) => std::process::exit(0),
-                        Err(err) => {
-                            eprintln!("服務停止失敗: {}", err);
-                            std::process::exit(1);
-                        }
+                    Ok(_) => std::process::exit(0),
+                    Err(err) => {
+                        eprintln!("服務停止失敗: {}", err);
+                        std::process::exit(1);
                     }
                 }
-                
-                #[cfg(target_family = "unix")]
+            }
+            
+            #[cfg(target_family = "unix")]
+            {
+                match TokioCommand::new("systemctl")
+                    .arg("stop")
+                    .arg(&name)
+                    .status()
+                    .await
                 {
-                    match TokioCommand::new("systemctl")
-                        .arg("stop")
-                        .arg(&name)
-                        .status()
-                        .await
-                    {
-                        Ok(status) if status.success() => std::process::exit(0),
-                        Ok(status) => {
-                            eprintln!("systemctl stop {} 失敗，狀態碼 {:?}", name, status.code());
-                            std::process::exit(status.code().unwrap_or(1));
-                        }
-                        Err(err) => {
-                            eprintln!("systemctl stop {} 執行失敗: {}", name, err);
-                            std::process::exit(1);
-                        }
+                    Ok(status) if status.success() => std::process::exit(0),
+                    Ok(status) => {
+                        eprintln!("systemctl stop {} 失敗，狀態碼 {:?}", name, status.code());
+                        std::process::exit(status.code().unwrap_or(1));
+                    }
+                    Err(err) => {
+                        eprintln!("systemctl stop {} 執行失敗: {}", name, err);
+                        std::process::exit(1);
                     }
                 }
-            });
+            }
         }
     }
     Ok(())
