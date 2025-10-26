@@ -5,7 +5,7 @@
 ## 功能特性
 
 - **擲骰系統**：支援 D&D 和 CoC 7e 擲骰
-- **日誌系統**：即時串流和批次日誌記錄
+- **日誌系統**：即時串流和批次日誌記錄，自動抑制重複和噪音日誌
 - **管理功能**：重啟機器人、管理開發者等
 - **配置管理**：JSON 格式的持久化配置
 
@@ -35,7 +35,7 @@ cargo run --release
 
 ### 與系統服務整合
 
-若機器人以 systemd 等服務管理器啟動，可在 `config.json` 的 `global` 區段設定：
+若機器人以服務管理器啟動，可在 `config.json` 的 `global` 區段設定：
 
 ```json
 {
@@ -44,10 +44,15 @@ cargo run --release
 }
 ```
 
-- `restart_mode`：`execv`（預設）會直接以原參數重新啟動程序；`service` 會透過 `systemctl restart/stop` 控制指定服務。
-- `restart_service`：當 `restart_mode` 為 `service` 時必填，為 systemd 服務名稱。
+- `restart_mode`：`execv`（預設）會嘗試重新啟動程序（Unix 使用 execv，Windows 會啟動新實例後退出）；`service` 會透過平台特定的服務管理工具控制指定服務。
+- `restart_service`：當 `restart_mode` 為 `service` 時必填，為服務名稱。
 
-完成設定後，`/admin restart` 與 `/admin shutdown` 將呼叫對應的 `systemctl restart/stop`，確保服務受系統管理。
+根據平台不同，機器人會使用對應的服務管理工具：
+
+- **Linux**：使用 `systemctl restart/stop` 控制服務
+- **Windows**：使用 `sc stop/start` 控制服務
+
+完成設定後，`/admin restart` 與 `/admin shutdown` 將呼叫對應的平台服務管理命令，確保服務受系統管理。
 
 ## 指令列表
 
@@ -86,6 +91,7 @@ cargo run --release
 1. **更多指令與系統支援**：擴充更多 TRPG 系統與自訂化功能。
 2. **測試補強**：加入整合測試確保核心指令穩定性。
 3. **性能優化**：進一步優化資源使用。
+4. **基本設定資料庫**：實現 base_settings_db 功能，用於管理伺服器和頻道的進階設定。
 
 ## 貢獻
 

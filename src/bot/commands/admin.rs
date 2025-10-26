@@ -1,17 +1,23 @@
 use crate::bot::{Context, Error};
-use crate::models::types::GlobalConfig;
 use poise::{
+    ChoiceParameter, CreateReply,
     serenity_prelude::{
         self as serenity, ButtonStyle, CreateActionRow, CreateButton, CreateInteractionResponse,
         CreateInteractionResponseMessage,
     },
-    ChoiceParameter, CreateReply,
 };
 use rand::random;
-use std::ffi::OsString;
-use std::path::Path;
 use std::time::Duration;
 use tokio::{process::Command as TokioCommand, time::sleep};
+
+// 定義 ProcessControl 枚舉
+#[derive(Clone)]
+enum ProcessControl {
+    Execv,
+    Service { name: String },
+}
+
+
 
 #[derive(Clone, Copy, Debug, ChoiceParameter)]
 pub enum AdminAction {
@@ -59,11 +65,7 @@ pub async fn admin(
                 }
             };
             ctx.say("已確認，機器人即將重新啟動……").await?;
-            let restart_settings = {
-                let config_manager = ctx.data().config.lock().await;
-                RestartSettings::from_global(&config_manager.global)
-            };
-            schedule_restart(restart_settings).await?;
+            schedule_restart(control).await?;
         }
         AdminAction::Shutdown => {
             if !confirm_action(&ctx, "確認關閉機器人？").await? {
@@ -204,13 +206,90 @@ async fn confirm_action(ctx: &Context<'_>, prompt: impl Into<String>) -> Result<
     }
 }
 
-async fn schedule_restart(settings: RestartSettings) -> Result<(), Error> {
-    tokio::spawn(async move {
-        sleep(Duration::from_millis(500)).await;
-        if let Err(err) = perform_restart(settings) {
-            eprintln!("Restart failed: {}", err);
+async fn schedule_restart(control: ProcessControl) -> Result<(), Error> {
+    match control {
+        ProcessControl::Execv => {
+            tokio::spawn(async {
+                sleep(Duration::from_millis(500)).await;
+                #[cfg(target_family = "unix")]
+                {
+                    use std::env;
+                    use std::os::unix::process::CommandExt;
+                    let exe = env::current_exe().unwrap();
+                    let args: Vec<String> = env::args().collect();
+                    std::process::Command::new(exe)
+                        .args(&args[1..])
+                        .exec();
+                }
+                
+                #[cfg(target_family = "windows")]
+                {
+                    // Windows doesn't have execv, so we'll spawn a new process and exit the current one
+                    use std::env;
+                    let exe = env::current_exe().unwrap();
+                    let args: Vec<String> = env::args().collect();
+                    if let Err(e) = std::process::Command::new(exe)
+                        .args(&args[1..])
+                        .spawn()
+                    {
+                        eprintln!("Failed to spawn new process: {}", e);
+                    }
+                }
+                std::process::exit(0);
+            });
         }
-    });
+        ProcessControl::Service { name } => {
+            tokio::spawn(async move {
+                sleep(Duration::from_millis(500)).await;
+                #[cfg(target_family = "windows")]
+                {
+                    match TokioCommand::new("sc")
+                        .args(["stop", &name])
+                        .status()
+                        .await
+                    {
+                        Ok(_) => {
+                            match TokioCommand::new("sc")
+                                .args(["start", &name])
+                                .status()
+                                .await
+                            {
+                                Ok(_) => std::process::exit(0),
+                                Err(err) => {
+                                    eprintln!("服務重啟失敗: {}", err);
+                                    std::process::exit(1);
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            eprintln!("服務停止失敗: {}", err);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                
+                #[cfg(target_family = "unix")]
+                {
+                    match TokioCommand::new("systemctl")
+                        .arg("restart")
+                        .arg(&name)
+                        .status()
+                        .await
+                    {
+                        Ok(status) if status.success() => std::process::exit(0),
+                        Ok(status) => {
+                            eprintln!("systemctl restart {} 失敗，狀態碼 {:?}", name, status.code());
+                            std::process::exit(status.code().unwrap_or(1));
+                        }
+                        Err(err) => {
+                            eprintln!("systemctl restart {} 執行失敗: {}", name, err);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+            });
+        }
+    }
     Ok(())
 }
 
@@ -225,20 +304,38 @@ async fn schedule_shutdown(control: ProcessControl) -> Result<(), Error> {
         ProcessControl::Service { name } => {
             tokio::spawn(async move {
                 sleep(Duration::from_millis(500)).await;
-                match TokioCommand::new("systemctl")
-                    .arg("stop")
-                    .arg(&name)
-                    .status()
-                    .await
+                #[cfg(target_family = "windows")]
                 {
-                    Ok(status) if status.success() => std::process::exit(0),
-                    Ok(status) => {
-                        eprintln!("systemctl stop {} 失敗，狀態碼 {:?}", name, status.code());
-                        std::process::exit(status.code().unwrap_or(1));
+                    match TokioCommand::new("sc")
+                        .args(["stop", &name])
+                        .status()
+                        .await
+                    {
+                        Ok(_) => std::process::exit(0),
+                        Err(err) => {
+                            eprintln!("服務停止失敗: {}", err);
+                            std::process::exit(1);
+                        }
                     }
-                    Err(err) => {
-                        eprintln!("systemctl stop {} 執行失敗: {}", name, err);
-                        std::process::exit(1);
+                }
+                
+                #[cfg(target_family = "unix")]
+                {
+                    match TokioCommand::new("systemctl")
+                        .arg("stop")
+                        .arg(&name)
+                        .status()
+                        .await
+                    {
+                        Ok(status) if status.success() => std::process::exit(0),
+                        Ok(status) => {
+                            eprintln!("systemctl stop {} 失敗，狀態碼 {:?}", name, status.code());
+                            std::process::exit(status.code().unwrap_or(1));
+                        }
+                        Err(err) => {
+                            eprintln!("systemctl stop {} 執行失敗: {}", name, err);
+                            std::process::exit(1);
+                        }
                     }
                 }
             });
@@ -247,145 +344,24 @@ async fn schedule_shutdown(control: ProcessControl) -> Result<(), Error> {
     Ok(())
 }
 
-fn perform_restart(settings: RestartSettings) -> Result<(), String> {
-    let exe = std::env::current_exe()
-        .map_err(|err| format!("unable to resolve executable path: {}", err))?;
-    let args: Vec<OsString> = std::env::args_os().skip(1).collect();
-    let strategy = resolve_restart_strategy(&settings);
 
-    match strategy {
-        #[cfg(target_family = "unix")]
-        RestartStrategy::ReplaceProcess => restart_via_exec(&exe, &args),
-        RestartStrategy::SpawnChild => restart_via_spawn(&exe, &args),
-        RestartStrategy::Service(service) => restart_via_service(&service),
+
+async fn process_control_from_config(ctx: &Context<'_>) -> Result<ProcessControl, String> {
+    let config_manager = ctx.data().config.lock().await;
+    let global_config = &config_manager.global;
+    
+    if global_config.restart_mode == "service" {
+        if let Some(service_name) = &global_config.restart_service {
+            Ok(ProcessControl::Service { 
+                name: service_name.clone() 
+            })
+        } else {
+            Err("restart_mode 為 service 時，必須設定 restart_service".to_string())
+        }
+    } else {
+        // 預設使用 execv 模式
+        Ok(ProcessControl::Execv)
     }
 }
 
-#[cfg(target_family = "unix")]
-fn restart_via_exec(exe: &Path, args: &[OsString]) -> Result<(), String> {
-    use std::os::unix::process::CommandExt;
 
-    let err = std::process::Command::new(exe).args(args).exec();
-    Err(format!("process replacement failed: {}", err))
-}
-
-fn restart_via_spawn(exe: &Path, args: &[OsString]) -> Result<(), String> {
-    std::process::Command::new(exe)
-        .args(args)
-        .spawn()
-        .map_err(|err| format!("failed to spawn replacement process: {}", err))?;
-    std::process::exit(0);
-    #[allow(unreachable_code)]
-    Ok(())
-}
-
-fn restart_via_service(service: &str) -> Result<(), String> {
-    #[cfg(target_family = "windows")]
-    {
-        let stop_status = std::process::Command::new("sc")
-            .args(["stop", service])
-            .status()
-            .map_err(|err| format!("failed to stop service {}: {}", service, err))?;
-
-        if !stop_status.success() {
-            return Err(format!(
-                "stopping service {} failed with status {:?}",
-                service, stop_status
-            ));
-        }
-
-        let start_status = std::process::Command::new("sc")
-            .args(["start", service])
-            .status()
-            .map_err(|err| format!("failed to start service {}: {}", service, err))?;
-
-        if !start_status.success() {
-            return Err(format!(
-                "starting service {} failed with status {:?}",
-                service, start_status
-            ));
-        }
-
-        std::process::exit(0);
-        #[allow(unreachable_code)]
-        return Ok(());
-    }
-
-    #[cfg(target_family = "unix")]
-    {
-        let status = std::process::Command::new("systemctl")
-            .args(["restart", service])
-            .status()
-            .map_err(|err| {
-                format!(
-                    "failed to restart service {} via systemctl: {}",
-                    service, err
-                )
-            })?;
-
-        if status.success() {
-            std::process::exit(0);
-            #[allow(unreachable_code)]
-            return Ok(());
-        }
-
-        return Err(format!(
-            "systemctl restart {} exited with status {:?}",
-            service, status
-        ));
-    }
-
-    #[cfg(not(any(target_family = "unix", target_family = "windows")))]
-    {
-        Err(format!(
-            "service restart mode is not supported on this platform (service: {})",
-            service
-        ))
-    }
-}
-
-#[derive(Clone)]
-struct RestartSettings {
-    mode: String,
-    service: Option<String>,
-}
-
-impl RestartSettings {
-    fn from_global(config: &GlobalConfig) -> Self {
-        Self {
-            mode: config.restart_mode.clone(),
-            service: config.restart_service.clone(),
-        }
-    }
-}
-
-enum RestartStrategy {
-    #[cfg(target_family = "unix")]
-    ReplaceProcess,
-    SpawnChild,
-    Service(String),
-}
-
-fn resolve_restart_strategy(settings: &RestartSettings) -> RestartStrategy {
-    match settings.mode.as_str() {
-        "spawn" => RestartStrategy::SpawnChild,
-        "service" => {
-            if let Some(service) = settings.service.clone() {
-                RestartStrategy::Service(service)
-            } else {
-                RestartStrategy::SpawnChild
-            }
-        }
-        _ => {
-            #[cfg(target_family = "unix")]
-            {
-                RestartStrategy::ReplaceProcess
-            }
-
-            #[cfg(not(target_family = "unix"))]
-            {
-                RestartStrategy::SpawnChild
-            }
-        }
-    }
-}

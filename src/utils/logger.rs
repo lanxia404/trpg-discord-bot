@@ -170,6 +170,10 @@ impl Log for DiscordLogger {
                 "request; self=Http",
                 "req=Request",
                 "post_hook; self=Ratelimit",
+                "handle_event",
+                "handle_gateway_dispatch",
+                "build; self=Request",
+                "InteractionCreate",
             ])
         });
 
