@@ -20,9 +20,7 @@ target
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-
 # Added by cargo
-
 /target
 
 # Qwen Code related files
@@ -30,10 +28,38 @@ QWEN.md
 
 # Local environment and runtime artifacts
 .env
+.env.example
 config.json
 *.log*
 .vscode/
 
 # SQL database files
 *.sqlite
-*.db*
+*.db
+
+# Python specific
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.python-version
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Python virtual environment in the project
+trpg-discord-bot-py/venv/
+
+# IDE specific
+.idea/
+*.swp
+*.swo
+*~
+
+# Runtime specific
+.DS_Store
+Thumbs.db
