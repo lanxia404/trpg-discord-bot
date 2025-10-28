@@ -59,8 +59,8 @@ pub async fn admin(
             }
             let control = match process_control_from_config(&ctx).await {
                 Ok(control) => control,
-                Err(msg) => {
-                    ctx.say(msg).await?;
+                Err(_) => {
+                    ctx.say("配置加載錯誤").await?;
                     return Ok(());
                 }
             };
@@ -73,8 +73,8 @@ pub async fn admin(
             }
             let control = match process_control_from_config(&ctx).await {
                 Ok(control) => control,
-                Err(msg) => {
-                    ctx.say(msg).await?;
+                Err(_) => {
+                    ctx.say("配置加載錯誤").await?;
                     return Ok(());
                 }
             };
@@ -215,9 +215,15 @@ async fn schedule_restart(control: ProcessControl) -> Result<(), Error> {
                 {
                     use std::env;
                     use std::os::unix::process::CommandExt;
-                    let exe = env::current_exe().unwrap();
+                    let exe = match env::current_exe() {
+                        Ok(path) => path,
+                        Err(e) => {
+                            eprintln!("Failed to get current executable path: {}", e);
+                            std::process::exit(1);
+                        }
+                    };
                     let args: Vec<String> = env::args().collect();
-                    std::process::Command::new(exe)
+                    let _ = std::process::Command::new(exe)
                         .args(&args[1..])
                         .exec();
                 }
@@ -226,7 +232,13 @@ async fn schedule_restart(control: ProcessControl) -> Result<(), Error> {
                 {
                     // Windows doesn't have execv, so we'll spawn a new process and exit the current one
                     use std::env;
-                    let exe = env::current_exe().unwrap();
+                    let exe = match env::current_exe() {
+                        Ok(path) => path,
+                        Err(e) => {
+                            eprintln!("Failed to get current executable path: {}", e);
+                            std::process::exit(1);
+                        }
+                    };
                     let args: Vec<String> = env::args().collect();
                     if let Err(e) = std::process::Command::new(exe)
                         .args(&args[1..])
@@ -345,7 +357,7 @@ async fn schedule_shutdown(control: ProcessControl) -> Result<(), Error> {
 
 
 
-async fn process_control_from_config(ctx: &Context<'_>) -> Result<ProcessControl, String> {
+async fn process_control_from_config(ctx: &Context<'_>) -> Result<ProcessControl, Error> {
     let config_manager = ctx.data().config.lock().await;
     let global_config = &config_manager.global;
     
@@ -355,7 +367,7 @@ async fn process_control_from_config(ctx: &Context<'_>) -> Result<ProcessControl
                 name: service_name.clone() 
             })
         } else {
-            Err("restart_mode 為 service 時，必須設定 restart_service".to_string())
+            Err(anyhow::anyhow!("restart_mode 為 service 時，必須設定 restart_service"))
         }
     } else {
         // 預設使用 execv 模式

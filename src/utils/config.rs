@@ -110,7 +110,7 @@ mod tests {
     #[test]
     fn test_config_manager_creation() {
         let path = "config.json";
-        let config = ConfigManager::new(path).unwrap();
+        let config = ConfigManager::new(path).expect("Failed to create ConfigManager in test");
         assert!(!config.global.restart_mode.is_empty());
     }
 }

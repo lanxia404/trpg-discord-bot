@@ -338,7 +338,7 @@ async fn log_critical_events(
         let builder = serenity::CreateMessage::new().embed(embed);
 
         if let Err(err) = channel.send_message(http, builder).await {
-            eprintln!("發送關鍵紀錄失敗: {:?}", err);
+            log::warn!("發送關鍵紀錄失敗: {:?}", err);
         }
     }
 

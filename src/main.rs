@@ -31,63 +31,55 @@ async fn main() -> Result<(), bot::Error> {
         .await
         .map_err(|e| anyhow!("開啟技能資料庫失敗: {}", e))?;
     skills_db.call(|conn| {
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS skills (
-                guild_id INTEGER NOT NULL,
-                user_id INTEGER NOT NULL,
-                name TEXT NOT NULL,
-                normalized_name TEXT NOT NULL,
-                skill_type TEXT NOT NULL,
-                level TEXT NOT NULL,
-                effect TEXT NOT NULL,
-                UNIQUE(guild_id, user_id, normalized_name)
-            )",
-            [],
-        )?;
-
-        // 既有資料表的結構升級：缺少欄位時補上；如果存在舊的 description 欄位則重建資料表。
-        let mut has_description = false;
+        // 檢查是否需要遷移：檢查是否存在 user_id 欄位
+        let mut has_user_id = false;
         {
             let mut stmt = conn.prepare("PRAGMA table_info(skills)")?;
             let mut rows = stmt.query([])?;
             while let Some(row) = rows.next()? {
                 let column_name: String = row.get(1)?;
-                if column_name == "description" {
-                    has_description = true;
+                if column_name == "user_id" {
+                    has_user_id = true;
+                    break;
                 }
             }
         }
 
-        if has_description {
+        // 如果存在 user_id 欄位，則重建表格（移除 user_id 欄位）
+        if has_user_id {
             conn.execute_batch(
                 "BEGIN;
                 DROP TABLE IF EXISTS skills_tmp;
                 CREATE TABLE skills_tmp (
                     guild_id INTEGER NOT NULL,
-                    user_id INTEGER NOT NULL,
                     name TEXT NOT NULL,
                     normalized_name TEXT NOT NULL,
                     skill_type TEXT NOT NULL,
                     level TEXT NOT NULL,
                     effect TEXT NOT NULL,
-                    UNIQUE(guild_id, user_id, normalized_name)
+                    UNIQUE(guild_id, normalized_name)
                 );
-                INSERT INTO skills_tmp (guild_id, user_id, name, normalized_name, skill_type, level, effect)
-                SELECT guild_id, user_id, name, normalized_name, COALESCE(skill_type, ''), COALESCE(level, ''), COALESCE(effect, '')
+                INSERT INTO skills_tmp (guild_id, name, normalized_name, skill_type, level, effect)
+                SELECT guild_id, name, normalized_name, skill_type, level, effect
                 FROM skills;
                 DROP TABLE skills;
                 ALTER TABLE skills_tmp RENAME TO skills;
                 COMMIT;",
             )?;
         } else {
-            let _ = conn.execute(
-                "ALTER TABLE skills ADD COLUMN skill_type TEXT NOT NULL DEFAULT ''",
+            // 如果沒有 user_id 欄位，則按照新結構創建表
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS skills (
+                    guild_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    normalized_name TEXT NOT NULL,
+                    skill_type TEXT NOT NULL,
+                    level TEXT NOT NULL,
+                    effect TEXT NOT NULL,
+                    UNIQUE(guild_id, normalized_name)
+                )",
                 [],
-            );
-            let _ = conn.execute(
-                "ALTER TABLE skills ADD COLUMN level TEXT NOT NULL DEFAULT ''",
-                [],
-            );
+            )?;
         }
 
         Ok(())
