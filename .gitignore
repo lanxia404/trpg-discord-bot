@@ -28,7 +28,6 @@ QWEN.md
 
 # Local environment and runtime artifacts
 .env
-.env.example
 config.json
 *.log*
 .vscode/
