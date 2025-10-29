@@ -473,8 +473,7 @@ async fn search_skills(
                          WHEN level LIKE ?2 THEN 3
                          ELSE 4 END,
                     ABS(LENGTH(normalized_name) - LENGTH(?3)),
-                    normalized_name
-                LIMIT 20",
+                    normalized_name",
             )?;
 
             let rows = stmt.query_map(params![guild_id_i64, pattern, search_term], |row| {
