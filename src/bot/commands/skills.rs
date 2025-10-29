@@ -240,12 +240,10 @@ pub async fn skill(
                                             ])
                                             .colour(serenity::Colour::GOLD);
                                         
-                                        let mut response = CreateInteractionResponseMessage::default();
-                                        response = response
+                                        // 首先響應詳細信息作為新消息（ephemeral）
+                                        let response = CreateInteractionResponseMessage::default()
                                             .embed(detail_embed)
-                                            .components(Vec::new()) // 清除按鈕
                                             .ephemeral(true); // 設置為私密消息
-
                                         interaction
                                             .create_response(
                                                 &ctx_clone,
@@ -253,19 +251,6 @@ pub async fn skill(
                                             )
                                             .await?;
                                         
-                                        // 重新發送原消息，保持翻頁功能可用
-                                        let (embed, components) = create_page(current_page);
-                                        let update_msg = CreateInteractionResponseMessage::default()
-                                            .embed(embed)
-                                            .components(components);
-                                        interaction
-                                            .create_response(
-                                                &ctx_clone,
-                                                CreateInteractionResponse::UpdateMessage(update_msg),
-                                            )
-                                            .await?;
-                                        
-                                        message = *interaction.message.clone();
                                         continue; // 繼續循環
                                     }
                                 }
