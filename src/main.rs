@@ -30,44 +30,8 @@ async fn main() -> Result<(), bot::Error> {
     let skills_db = tokio_rusqlite::Connection::open("skills.db")
         .await
         .map_err(|e| anyhow!("開啟技能資料庫失敗: {}", e))?;
-    skills_db.call(|conn| {
-        // 檢查是否需要遷移：檢查是否存在 user_id 欄位
-        let mut has_user_id = false;
-        {
-            let mut stmt = conn.prepare("PRAGMA table_info(skills)")?;
-            let mut rows = stmt.query([])?;
-            while let Some(row) = rows.next()? {
-                let column_name: String = row.get(1)?;
-                if column_name == "user_id" {
-                    has_user_id = true;
-                    break;
-                }
-            }
-        }
-
-        // 如果存在 user_id 欄位，則重建表格（移除 user_id 欄位）
-        if has_user_id {
-            conn.execute_batch(
-                "BEGIN;
-                DROP TABLE IF EXISTS skills_tmp;
-                CREATE TABLE skills_tmp (
-                    guild_id INTEGER NOT NULL,
-                    name TEXT NOT NULL,
-                    normalized_name TEXT NOT NULL,
-                    skill_type TEXT NOT NULL,
-                    level TEXT NOT NULL,
-                    effect TEXT NOT NULL,
-                    UNIQUE(guild_id, normalized_name)
-                );
-                INSERT INTO skills_tmp (guild_id, name, normalized_name, skill_type, level, effect)
-                SELECT guild_id, name, normalized_name, skill_type, level, effect
-                FROM skills;
-                DROP TABLE skills;
-                ALTER TABLE skills_tmp RENAME TO skills;
-                COMMIT;",
-            )?;
-        } else {
-            // 如果沒有 user_id 欄位，則按照新結構創建表
+    skills_db
+        .call(|conn| {
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS skills (
                     guild_id INTEGER NOT NULL,
@@ -80,12 +44,10 @@ async fn main() -> Result<(), bot::Error> {
                 )",
                 [],
             )?;
-        }
-
-        Ok(())
-    })
-    .await
-    .map_err(|e| anyhow!("初始化技能資料庫失敗: {}", e))?;
+            Ok(())
+        })
+        .await
+        .map_err(|e| anyhow!("初始化技能資料庫失敗: {}", e))?;
 
     let base_settings_db = tokio_rusqlite::Connection::open("base_settings.db")
         .await
@@ -97,7 +59,7 @@ async fn main() -> Result<(), bot::Error> {
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             )",
-            [],
+                [],
             )?;
             Ok(())
         })
@@ -121,7 +83,11 @@ async fn main() -> Result<(), bot::Error> {
             Box::pin(async move {
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
                 println!("{} 已經上線!", ready.user.name);
-                Ok(BotData { config, skills_db, base_settings_db })
+                Ok(BotData {
+                    config,
+                    skills_db,
+                    base_settings_db,
+                })
             })
         })
         .build();

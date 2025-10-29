@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use crate::bot::{Context, Error};
 use poise::{
-    serenity_prelude::{self as serenity, CreateActionRow, CreateButton},
     CreateReply,
+    serenity_prelude::{self as serenity, CreateActionRow, CreateButton},
 };
 
 /// 顯示指令說明

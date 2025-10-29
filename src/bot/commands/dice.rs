@@ -2,7 +2,7 @@ use crate::bot::{Context, Error};
 use crate::models::types::RollResult;
 use crate::utils::coc::{determine_success_level, format_success_level, roll_coc_multi};
 use crate::utils::dice::roll_multiple_dice;
-use poise::{serenity_prelude as serenity, CreateReply};
+use poise::{CreateReply, serenity_prelude as serenity};
 use serenity::model::prelude::Mentionable;
 
 /// D&D 骰子指令 - 擲骰子

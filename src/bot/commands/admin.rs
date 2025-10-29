@@ -17,8 +17,6 @@ enum ProcessControl {
     Service { name: String },
 }
 
-
-
 #[derive(Clone, Copy, Debug, ChoiceParameter)]
 pub enum AdminAction {
     #[name = "restart"]
@@ -223,11 +221,9 @@ async fn schedule_restart(control: ProcessControl) -> Result<(), Error> {
                         }
                     };
                     let args: Vec<String> = env::args().collect();
-                    let _ = std::process::Command::new(exe)
-                        .args(&args[1..])
-                        .exec();
+                    let _ = std::process::Command::new(exe).args(&args[1..]).exec();
                 }
-                
+
                 #[cfg(target_family = "windows")]
                 {
                     // Windows doesn't have execv, so we'll spawn a new process and exit the current one
@@ -240,10 +236,7 @@ async fn schedule_restart(control: ProcessControl) -> Result<(), Error> {
                         }
                     };
                     let args: Vec<String> = env::args().collect();
-                    if let Err(e) = std::process::Command::new(exe)
-                        .args(&args[1..])
-                        .spawn()
-                    {
+                    if let Err(e) = std::process::Command::new(exe).args(&args[1..]).spawn() {
                         eprintln!("Failed to spawn new process: {}", e);
                     }
                 }
@@ -255,11 +248,7 @@ async fn schedule_restart(control: ProcessControl) -> Result<(), Error> {
                 sleep(Duration::from_millis(500)).await;
                 #[cfg(target_family = "windows")]
                 {
-                    match TokioCommand::new("sc")
-                        .args(["stop", &name])
-                        .status()
-                        .await
-                    {
+                    match TokioCommand::new("sc").args(["stop", &name]).status().await {
                         Ok(_) => {
                             match TokioCommand::new("sc")
                                 .args(["start", &name])
@@ -279,7 +268,7 @@ async fn schedule_restart(control: ProcessControl) -> Result<(), Error> {
                         }
                     }
                 }
-                
+
                 #[cfg(target_family = "unix")]
                 {
                     match TokioCommand::new("systemctl")
@@ -290,7 +279,11 @@ async fn schedule_restart(control: ProcessControl) -> Result<(), Error> {
                     {
                         Ok(status) if status.success() => std::process::exit(0),
                         Ok(status) => {
-                            eprintln!("systemctl restart {} 失敗，狀態碼 {:?}", name, status.code());
+                            eprintln!(
+                                "systemctl restart {} 失敗，狀態碼 {:?}",
+                                name,
+                                status.code()
+                            );
                             std::process::exit(status.code().unwrap_or(1));
                         }
                         Err(err) => {
@@ -318,11 +311,7 @@ async fn schedule_shutdown(control: ProcessControl) -> Result<(), Error> {
             // 在服務模式下，使用系統服務管理器關閉服務
             #[cfg(target_family = "windows")]
             {
-                match TokioCommand::new("sc")
-                    .args(["stop", &name])
-                    .status()
-                    .await
-                {
+                match TokioCommand::new("sc").args(["stop", &name]).status().await {
                     Ok(_) => std::process::exit(0),
                     Err(err) => {
                         eprintln!("服務停止失敗: {}", err);
@@ -330,7 +319,7 @@ async fn schedule_shutdown(control: ProcessControl) -> Result<(), Error> {
                     }
                 }
             }
-            
+
             #[cfg(target_family = "unix")]
             {
                 match TokioCommand::new("systemctl")
@@ -355,24 +344,22 @@ async fn schedule_shutdown(control: ProcessControl) -> Result<(), Error> {
     Ok(())
 }
 
-
-
 async fn process_control_from_config(ctx: &Context<'_>) -> Result<ProcessControl, Error> {
     let config_manager = ctx.data().config.lock().await;
     let global_config = &config_manager.global;
-    
+
     if global_config.restart_mode == "service" {
         if let Some(service_name) = &global_config.restart_service {
-            Ok(ProcessControl::Service { 
-                name: service_name.clone() 
+            Ok(ProcessControl::Service {
+                name: service_name.clone(),
             })
         } else {
-            Err(anyhow::anyhow!("restart_mode 為 service 時，必須設定 restart_service"))
+            Err(anyhow::anyhow!(
+                "restart_mode 為 service 時，必須設定 restart_service"
+            ))
         }
     } else {
         // 預設使用 execv 模式
         Ok(ProcessControl::Execv)
     }
 }
-
-

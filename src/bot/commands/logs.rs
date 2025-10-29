@@ -1,6 +1,6 @@
 use crate::bot::{Context, Error};
 use crate::models::types::StreamMode;
-use poise::{serenity_prelude as serenity, ChoiceParameter, CreateReply};
+use poise::{ChoiceParameter, CreateReply, serenity_prelude as serenity};
 
 #[derive(Clone, Copy, Debug, ChoiceParameter)]
 pub enum StreamToggle {
