@@ -36,23 +36,6 @@ config.json
 *.sqlite
 *.db
 
-# Python specific
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-env/
-venv/
-ENV/
-.python-version
-.pytest_cache/
-.coverage
-htmlcov/
-
-# Python virtual environment in the project
-trpg-discord-bot-py/venv/
-
 # IDE specific
 .idea/
 *.swp
