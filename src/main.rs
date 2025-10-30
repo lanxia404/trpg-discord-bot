@@ -32,6 +32,7 @@ async fn main() -> Result<(), bot::Error> {
         .map_err(|e| anyhow!("開啟技能資料庫失敗: {}", e))?;
     skills_db
         .call(|conn| {
+            // 创建表（如果不存在）
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS skills (
                     guild_id INTEGER NOT NULL,
@@ -40,10 +41,31 @@ async fn main() -> Result<(), bot::Error> {
                     skill_type TEXT NOT NULL,
                     level TEXT NOT NULL,
                     effect TEXT NOT NULL,
+                    occupation TEXT DEFAULT '',
+                    race TEXT DEFAULT '',
                     UNIQUE(guild_id, normalized_name)
                 )",
                 [],
             )?;
+            
+            // 检查并添加 occupation 字段（如果不存在）
+            match conn.execute(
+                "ALTER TABLE skills ADD COLUMN occupation TEXT DEFAULT ''",
+                [],
+            ) {
+                Ok(_) => {}, // 字段添加成功或已存在
+                Err(_) => {}, // 字段已存在，忽略错误
+            }
+            
+            // 检查并添加 race 字段（如果不存在）
+            match conn.execute(
+                "ALTER TABLE skills ADD COLUMN race TEXT DEFAULT ''",
+                [],
+            ) {
+                Ok(_) => {}, // 字段添加成功或已存在
+                Err(_) => {}, // 字段已存在，忽略错误
+            }
+            
             Ok(())
         })
         .await

@@ -25,6 +25,8 @@ struct DbSkill {
     skill_type: String,
     level: String,
     effect: String,
+    occupation: String,
+    race: String,
 }
 
 /// 技能資料庫指令
@@ -36,6 +38,8 @@ pub async fn skill(
     #[description = "技能類型 (add 必填)"] skill_type: Option<String>,
     #[description = "技能等級 (add 必填)"] level: Option<String>,
     #[description = "技能效果 (add 必填)"] effect: Option<String>,
+    #[description = "職業 (add 選填)"] occupation: Option<String>,
+    #[description = "種族 (add 選填)"] race: Option<String>,
 ) -> Result<(), Error> {
     let guild_id = match ctx.guild_id() {
         Some(id) => id.get(),
@@ -76,16 +80,28 @@ pub async fn skill(
             };
             let effect = effect.trim().to_string();
 
-            add_skill(&ctx, guild_id, &name, &skill_type, &level, &effect).await?;
+            let occupation = occupation.filter(|s| !s.trim().is_empty()).map(|s| s.trim().to_string()).unwrap_or_default();
+            let race = race.filter(|s| !s.trim().is_empty()).map(|s| s.trim().to_string()).unwrap_or_default();
+
+            add_skill(&ctx, guild_id, &name, &skill_type, &level, &effect, &occupation, &race).await?;
+
+            let mut fields = vec![
+                ("名稱", format!("`{}`", name), false),
+                ("類型", skill_type.clone(), true),
+                ("等級", level.clone(), true),
+                ("效果", effect.clone(), false),
+            ];
+            
+            if !occupation.is_empty() {
+                fields.push(("職業", occupation.clone(), true));
+            }
+            if !race.is_empty() {
+                fields.push(("種族", race.clone(), true));
+            }
 
             let embed = serenity::CreateEmbed::default()
                 .title("技能已儲存")
-                .fields([
-                    ("名稱", format!("`{}`", name), false),
-                    ("類型", skill_type.clone(), true),
-                    ("等級", level.clone(), true),
-                    ("效果", effect.clone(), false),
-                ])
+                .fields(fields)
                 .colour(serenity::Colour::DARK_GREEN);
             ctx.send(CreateReply::default().embed(embed)).await?;
         }
@@ -103,13 +119,22 @@ pub async fn skill(
             } else if search_results.len() == 1 {
                 // 如果只找到一個結果，直接顯示該技能
                 let db_skill = &search_results[0];
+                let mut fields = vec![
+                    ("類型", db_skill.skill_type.clone(), true),
+                    ("等級", db_skill.level.clone(), true),
+                    ("效果", db_skill.effect.clone(), false),
+                ];
+                
+                if !db_skill.occupation.is_empty() {
+                    fields.push(("職業", db_skill.occupation.clone(), true));
+                }
+                if !db_skill.race.is_empty() {
+                    fields.push(("種族", db_skill.race.clone(), true));
+                }
+
                 let embed = serenity::CreateEmbed::default()
                     .title(format!("技能：<{}>", db_skill.name))
-                    .fields([
-                        ("類型", db_skill.skill_type.clone(), true),
-                        ("等級", db_skill.level.clone(), true),
-                        ("效果", db_skill.effect.clone(), false),
-                    ])
+                    .fields(fields)
                     .colour(serenity::Colour::BLURPLE);
 
                 ctx.send(CreateReply::default().embed(embed)).await?;
@@ -130,13 +155,24 @@ pub async fn skill(
                     // 添加當前頁面的技能
                     for (i, skill) in search_results[start_idx..end_idx].iter().enumerate() {
                         let skill_idx = start_idx + i;
-                        description.push_str(&format!(
-                            "**{}**. **名稱**: {}\n**類型**: {} | **等級**: {}\n\n",
+                        let mut skill_info = format!(
+                            "**{}**. **名稱**: {}\n**類型**: {} | **等級**: {}",
                             skill_idx + 1,  // 顯示全局編號
                             skill.name,
                             skill.skill_type,
                             skill.level
-                        ));
+                        );
+                        
+                        // 添加職業和種族信息（如果存在）
+                        if !skill.occupation.is_empty() {
+                            skill_info.push_str(&format!(" | **職業**: {}", skill.occupation));
+                        }
+                        if !skill.race.is_empty() {
+                            skill_info.push_str(&format!(" | **種族**: {}", skill.race));
+                        }
+                        skill_info.push_str("\n\n");
+                        
+                        description.push_str(&skill_info);
                     }
                     
                     // 添加技能選擇按鈕 (每行最多4個技能按鈕，保留空間給翻頁按鈕)
@@ -231,7 +267,7 @@ pub async fn skill(
                                         let selected_skill = &search_results[skill_index];
                                         
                                         // 創建詳細信息的embed
-                                        let detail_embed = serenity::CreateEmbed::default()
+                                        let mut detail_embed = serenity::CreateEmbed::default()
                                             .title(format!("技能詳細：<{}>", selected_skill.name))
                                             .fields([
                                                 ("類型", selected_skill.skill_type.clone(), true),
@@ -239,6 +275,14 @@ pub async fn skill(
                                                 ("效果", selected_skill.effect.clone(), false),
                                             ])
                                             .colour(serenity::Colour::GOLD);
+
+                                        // 添加職業和種族信息（如果存在）
+                                        if !selected_skill.occupation.is_empty() {
+                                            detail_embed = detail_embed.field("職業", &selected_skill.occupation, true);
+                                        }
+                                        if !selected_skill.race.is_empty() {
+                                            detail_embed = detail_embed.field("種族", &selected_skill.race, true);
+                                        }
                                         
                                         // 首先響應詳細信息作為新消息（ephemeral）
                                         let response = CreateInteractionResponseMessage::default()
@@ -337,12 +381,21 @@ pub async fn skill(
                     .style(ButtonStyle::Secondary),
             ])];
 
+            let mut description = format!(
+                "目標技能：`{}`\n類型：{}\n等級：{}\n效果：{}",
+                &db_skill.name, &db_skill.skill_type, &db_skill.level, &db_skill.effect
+            );
+            
+            if !db_skill.occupation.is_empty() {
+                description.push_str(&format!("\n職業：{}", &db_skill.occupation));
+            }
+            if !db_skill.race.is_empty() {
+                description.push_str(&format!("\n種族：{}", &db_skill.race));
+            }
+            
             let embed = serenity::CreateEmbed::default()
                 .title("確認刪除技能")
-                .description(format!(
-                    "目標技能：`{}`\n類型：{}\n等級：{}\n效果：{}",
-                    &db_skill.name, &db_skill.skill_type, &db_skill.level, &db_skill.effect
-                ))
+                .description(description)
                 .colour(serenity::Colour::DARK_RED);
 
             let reply = CreateReply::default().embed(embed).components(components);
@@ -405,6 +458,8 @@ async fn add_skill(
     skill_type: &str,
     level: &str,
     effect: &str,
+    occupation: &str,
+    race: &str,
 ) -> Result<(), Error> {
     let skills_db = ctx.data().skills_db.clone();
     let normalized = name.to_lowercase();
@@ -412,20 +467,24 @@ async fn add_skill(
     let skill_type = skill_type.to_string();
     let level = level.to_string();
     let effect = effect.to_string();
+    let occupation = occupation.to_string();
+    let race = race.to_string();
 
     skills_db.call(move |conn| {
         conn.execute(
-            "INSERT INTO skills (guild_id, name, normalized_name, skill_type, level, effect)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "INSERT INTO skills (guild_id, name, normalized_name, skill_type, level, effect, occupation, race)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
             ON CONFLICT(guild_id, normalized_name)
-            DO UPDATE SET name=excluded.name, skill_type=excluded.skill_type, level=excluded.level, effect=excluded.effect",
+            DO UPDATE SET name=excluded.name, skill_type=excluded.skill_type, level=excluded.level, effect=excluded.effect, occupation=excluded.occupation, race=excluded.race",
             params![
                 guild_id as i64,
                 name,
                 normalized,
                 skill_type,
                 level,
-                effect
+                effect,
+                occupation,
+                race
             ],
         )?;
         Ok(())
@@ -448,15 +507,17 @@ async fn search_skills(
     let result = skills_db
         .call(move |conn| -> DbResult<Vec<DbSkill>> {
             let mut stmt = conn.prepare(
-                "SELECT name, normalized_name, skill_type, level, effect
+                "SELECT name, normalized_name, skill_type, level, effect, occupation, race
                 FROM skills
                 WHERE guild_id = ?1 
-                AND (normalized_name LIKE ?2 OR skill_type LIKE ?2 OR level LIKE ?2)
+                AND (normalized_name LIKE ?2 OR skill_type LIKE ?2 OR level LIKE ?2 OR occupation LIKE ?2 OR race LIKE ?2)
                 ORDER BY 
                     CASE WHEN normalized_name LIKE ?2 THEN 1
                          WHEN skill_type LIKE ?2 THEN 2
                          WHEN level LIKE ?2 THEN 3
-                         ELSE 4 END,
+                         WHEN occupation LIKE ?2 THEN 4
+                         WHEN race LIKE ?2 THEN 5
+                         ELSE 6 END,
                     ABS(LENGTH(normalized_name) - LENGTH(?3)),
                     normalized_name",
             )?;
@@ -468,6 +529,8 @@ async fn search_skills(
                     skill_type: row.get(2)?,
                     level: row.get(3)?,
                     effect: row.get(4)?,
+                    occupation: row.get(5)?,
+                    race: row.get(6)?,
                 })
             })?;
 
@@ -497,7 +560,7 @@ async fn find_skill_in_guild(
         .call(move |conn| -> DbResult<Option<DbSkill>> {
             let row = conn
                 .query_row(
-                    "SELECT name, normalized_name, skill_type, level, effect
+                    "SELECT name, normalized_name, skill_type, level, effect, occupation, race
                 FROM skills
                 WHERE guild_id = ?1 AND normalized_name LIKE ?2
                 ORDER BY CASE WHEN normalized_name = ?3 THEN 0 ELSE 1 END,
@@ -512,6 +575,8 @@ async fn find_skill_in_guild(
                             skill_type: row.get(2)?,
                             level: row.get(3)?,
                             effect: row.get(4)?,
+                            occupation: row.get(5)?,
+                            race: row.get(6)?,
                         })
                     },
                 )
