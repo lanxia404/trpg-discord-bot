@@ -85,6 +85,9 @@ pub async fn skill(
 
             add_skill(&ctx, guild_id, &name, &skill_type, &level, &effect, &occupation, &race).await?;
 
+            // 獲取技能總數以顯示在嵌入消息中
+            let total_skills_count = get_total_skills_count(&ctx, guild_id).await?;
+            
             let mut fields = vec![
                 ("名稱", format!("`{}`", name), false),
                 ("類型", skill_type.clone(), true),
@@ -101,17 +104,22 @@ pub async fn skill(
 
             let embed = serenity::CreateEmbed::default()
                 .title("技能已儲存")
+                .footer(serenity::CreateEmbedFooter::new(format!("總技能數：{}", total_skills_count)))
                 .fields(fields)
                 .colour(serenity::Colour::DARK_GREEN);
             ctx.send(CreateReply::default().embed(embed)).await?;
         }
         SkillAction::Show => {
+            // 獲取技能總數
+            let total_skills_count = get_total_skills_count(&ctx, guild_id).await?;
+            
             // 進行多字段模糊搜索
             let search_results = search_skills(&ctx, guild_id, &name).await?;
 
             if search_results.is_empty() {
                 let embed = serenity::CreateEmbed::default()
                     .title(format!("技能：<{}>", name))
+                    .footer(serenity::CreateEmbedFooter::new(format!("總技能數：{}", total_skills_count)))
                     .colour(serenity::Colour::ORANGE)
                     .description(format!("找不到包含 `{}` 的技能", name));
 
@@ -134,6 +142,7 @@ pub async fn skill(
 
                 let embed = serenity::CreateEmbed::default()
                     .title(format!("技能：<{}>", db_skill.name))
+                    .footer(serenity::CreateEmbedFooter::new(format!("總技能數：{}", total_skills_count)))
                     .fields(fields)
                     .colour(serenity::Colour::BLURPLE);
 
@@ -232,6 +241,7 @@ pub async fn skill(
                     
                     let embed = serenity::CreateEmbed::default()
                         .title(format!("包含「{}」的技能 (第 {}/{} 頁)", name, page_index + 1, total_pages))
+                        .footer(serenity::CreateEmbedFooter::new(format!("總技能數：{}", total_skills_count)))
                         .description(description)
                         .colour(serenity::Colour::BLURPLE);
                     
@@ -269,6 +279,7 @@ pub async fn skill(
                                         // 創建詳細信息的embed
                                         let mut detail_embed = serenity::CreateEmbed::default()
                                             .title(format!("技能詳細：<{}>", selected_skill.name))
+                                            .footer(serenity::CreateEmbedFooter::new(format!("總技能數：{}", total_skills_count)))
                                             .fields([
                                                 ("類型", selected_skill.skill_type.clone(), true),
                                                 ("等級", selected_skill.level.clone(), true),
@@ -357,13 +368,20 @@ pub async fn skill(
             let caller = ctx.author().clone();
 
             let Some(db_skill) = find_skill_in_guild(&ctx, guild_id, &name).await? else {
+                // 獲取技能總數以顯示在嵌入消息中
+                let total_skills_count = get_total_skills_count(&ctx, guild_id).await?;
+                
                 let embed = serenity::CreateEmbed::default()
+                    .footer(serenity::CreateEmbedFooter::new(format!("總技能數：{}", total_skills_count)))
                     .colour(serenity::Colour::ORANGE)
                     .description(format!("找不到此伺服器中的技能 `{}`，無法刪除", name));
                 ctx.send(CreateReply::default().embed(embed)).await?;
                 return Ok(());
             };
 
+            // 在確認刪除前先獲取當前技能總數
+            let total_skills_count_before = get_total_skills_count(&ctx, guild_id).await?;
+            
             let confirm_id = format!(
                 "skill_delete_confirm:{}:{}",
                 guild_id, db_skill.normalized_name
@@ -395,6 +413,7 @@ pub async fn skill(
             
             let embed = serenity::CreateEmbed::default()
                 .title("確認刪除技能")
+                .footer(serenity::CreateEmbedFooter::new(format!("總技能數：{}", total_skills_count_before)))
                 .description(description)
                 .colour(serenity::Colour::DARK_RED);
 
@@ -415,7 +434,10 @@ pub async fn skill(
                 Some(interaction) if interaction.data.custom_id == confirm_id => {
                     delete_skill(&ctx, guild_id, &db_skill.normalized_name).await?;
 
-                    let summary = format!("{} 刪除了技能 `{}`", caller.mention(), db_skill.name);
+                    // 技能刪除後再次獲取新的技能總數
+                    let total_skills_count_after = get_total_skills_count(&ctx, guild_id).await?;
+                    
+                    let summary = format!("{} 刪除了技能 `{}` (剩餘技能數：{})", caller.mention(), db_skill.name, total_skills_count_after);
 
                     let mut response = CreateInteractionResponseMessage::default();
                     response = response.content(summary).components(Vec::new());
@@ -427,9 +449,12 @@ pub async fn skill(
                         .await?;
                 }
                 Some(interaction) => {
+                    // 獲取技能總數以顯示在嵌入消息中
+                    let total_skills_count = get_total_skills_count(&ctx, guild_id).await?;
+                    
                     let mut response = CreateInteractionResponseMessage::default();
                     response = response
-                        .content(format!("{} 取消刪除操作", caller.mention()))
+                        .content(format!("{} 取消刪除操作 (總技能數：{})", caller.mention(), total_skills_count))
                         .components(Vec::new());
                     interaction
                         .create_response(
@@ -439,8 +464,11 @@ pub async fn skill(
                         .await?;
                 }
                 None => {
+                    // 獲取技能總數以顯示在嵌入消息中
+                    let total_skills_count = get_total_skills_count(&ctx, guild_id).await?;
+                    
                     let edit = serenity::builder::EditMessage::new()
-                        .content("操作逾時，未刪除任何技能")
+                        .content(format!("操作逾時，未刪除任何技能 (總技能數：{})", total_skills_count))
                         .components(Vec::new());
                     let _ = message.edit(&ctx_clone.http, edit).await;
                 }
@@ -586,6 +614,21 @@ async fn find_skill_in_guild(
         .await?;
 
     Ok(result)
+}
+
+async fn get_total_skills_count(ctx: &Context<'_>, guild_id: u64) -> Result<i32, Error> {
+    let skills_db = ctx.data().skills_db.clone();
+    let guild_id_i64 = guild_id as i64;
+
+    let count = skills_db
+        .call(move |conn| -> DbResult<i32> {
+            let mut stmt = conn.prepare("SELECT COUNT(*) FROM skills WHERE guild_id = ?1")?;
+            let count: i32 = stmt.query_row([guild_id_i64], |row| row.get(0))?;
+            Ok(count)
+        })
+        .await?;
+
+    Ok(count)
 }
 
 async fn delete_skill(

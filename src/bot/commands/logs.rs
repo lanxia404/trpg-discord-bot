@@ -52,8 +52,8 @@ pub async fn log_stream(
         }
     };
 
-    let mut config_manager = ctx.data().config.lock().await;
-    let mut guild_config = config_manager.get_guild_config(guild_id);
+    let config_manager = ctx.data().config.lock().await;
+    let mut guild_config = futures::executor::block_on(config_manager.get_guild_config(guild_id));
 
     match state {
         StreamToggle::On => {
@@ -65,13 +65,13 @@ pub async fn log_stream(
                 }
             };
             guild_config.log_channel = Some(channel.get());
-            config_manager.set_guild_config(guild_id, guild_config)?;
+            futures::executor::block_on(config_manager.set_guild_config(guild_id, guild_config))?;
             ctx.say(format!("日誌串流已開啟，使用頻道: <#{}>", channel))
                 .await?;
         }
         StreamToggle::Off => {
             guild_config.log_channel = None;
-            config_manager.set_guild_config(guild_id, guild_config)?;
+            futures::executor::block_on(config_manager.set_guild_config(guild_id, guild_config))?;
             ctx.say("日誌串流已關閉").await?;
         }
     }
@@ -93,10 +93,10 @@ pub async fn log_stream_mode(
         }
     };
 
-    let mut config_manager = ctx.data().config.lock().await;
-    let mut guild_config = config_manager.get_guild_config(guild_id);
+    let config_manager = ctx.data().config.lock().await;
+    let mut guild_config = futures::executor::block_on(config_manager.get_guild_config(guild_id));
     guild_config.stream_mode = mode.into();
-    config_manager.set_guild_config(guild_id, guild_config)?;
+    futures::executor::block_on(config_manager.set_guild_config(guild_id, guild_config))?;
 
     let mode_text = match mode {
         StreamModeChoice::Live => "live",
@@ -126,8 +126,8 @@ pub async fn crit(
         }
     };
 
-    let mut manager = ctx.data().config.lock().await;
-    let mut guild_config = manager.get_guild_config(guild_id);
+    let manager = ctx.data().config.lock().await;
+    let mut guild_config = futures::executor::block_on(manager.get_guild_config(guild_id));
 
     let (label, field) = match kind {
         CritChannelKind::Success => ("大成功", &mut guild_config.crit_success_channel),
@@ -135,7 +135,7 @@ pub async fn crit(
     };
 
     *field = channel.map(|ch| ch.get());
-    manager.set_guild_config(guild_id, guild_config)?;
+    futures::executor::block_on(manager.set_guild_config(guild_id, guild_config))?;
     drop(manager);
 
     let description = match channel {

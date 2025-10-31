@@ -15,9 +15,11 @@ pub async fn roll(
         let data = ctx.data();
         let config_handle = data.config.lock().await;
         let guild_id = ctx.guild_id().map(|id| id.get());
-        let guild_config = guild_id
-            .map(|id| config_handle.get_guild_config(id))
-            .unwrap_or_default();
+        let guild_config = if let Some(id) = guild_id {
+            futures::executor::block_on(config_handle.get_guild_config(id))
+        } else {
+            Default::default()
+        };
         guild_config.dnd_rules
     };
 
@@ -78,7 +80,7 @@ pub async fn coc(
     let rules = {
         let data = ctx.data();
         let config_handle = data.config.lock().await;
-        config_handle.get_guild_config(guild_id).coc_rules
+        futures::executor::block_on(config_handle.get_guild_config(guild_id)).coc_rules
     };
 
     let times = times.unwrap_or(1);
@@ -316,7 +318,7 @@ async fn log_critical_events(
     let (success_channel, fail_channel) = {
         let data = ctx.data();
         let manager = data.config.lock().await;
-        let cfg = manager.get_guild_config(guild_id.get());
+        let cfg = futures::executor::block_on(manager.get_guild_config(guild_id.get()));
         (cfg.crit_success_channel, cfg.crit_fail_channel)
     };
 

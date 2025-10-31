@@ -42,7 +42,7 @@ pub async fn admin(
 
     let has_permission = {
         let config_manager = ctx.data().config.lock().await;
-        config_manager.is_developer(caller_id)
+        futures::executor::block_on(config_manager.is_developer(caller_id))
     };
 
     if !has_permission {
@@ -93,8 +93,8 @@ pub async fn admin(
                 return Ok(());
             }
 
-            let mut config_manager = ctx.data().config.lock().await;
-            if config_manager.add_developer(user.id.get())? {
+            let config_manager = ctx.data().config.lock().await;
+            if futures::executor::block_on(config_manager.add_developer(user.id.get()))? {
                 ctx.say(format!("用戶 <@{}> 已添加到開發者列表", user.id))
                     .await?;
             } else {
@@ -115,8 +115,8 @@ pub async fn admin(
                 return Ok(());
             }
 
-            let mut config_manager = ctx.data().config.lock().await;
-            if config_manager.remove_developer(user.id.get())? {
+            let config_manager = ctx.data().config.lock().await;
+            if futures::executor::block_on(config_manager.remove_developer(user.id.get()))? {
                 ctx.say(format!("用戶 <@{}> 已從開發者列表移除", user.id))
                     .await?;
             } else {
@@ -126,7 +126,8 @@ pub async fn admin(
         }
         AdminAction::DevList => {
             let config_manager = ctx.data().config.lock().await;
-            let developers = &config_manager.global.developers;
+            let global_config = config_manager.get_global_config().await;
+            let developers = &global_config.developers;
             if developers.is_empty() {
                 ctx.say("目前沒有開發者").await?;
             } else {
@@ -346,7 +347,7 @@ async fn schedule_shutdown(control: ProcessControl) -> Result<(), Error> {
 
 async fn process_control_from_config(ctx: &Context<'_>) -> Result<ProcessControl, Error> {
     let config_manager = ctx.data().config.lock().await;
-    let global_config = &config_manager.global;
+    let global_config = config_manager.get_global_config().await;
 
     if global_config.restart_mode == "service" {
         if let Some(service_name) = &global_config.restart_service {

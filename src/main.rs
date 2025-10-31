@@ -23,8 +23,7 @@ async fn main() -> Result<(), bot::Error> {
     let token =
         env::var("DISCORD_TOKEN").map_err(|_| anyhow!("預期 DISCORD_TOKEN 環境變數，但找不到!"))?;
 
-    let config_manager =
-        ConfigManager::new("config.json").map_err(|e| anyhow!("設定管理器初始化失敗: {}", e))?;
+    let config_manager = ConfigManager::new("config.json").await.map_err(|e| anyhow!("設定管理器初始化失敗: {}", e))?;
     let shared_config = Arc::new(Mutex::new(config_manager));
 
     let skills_db = tokio_rusqlite::Connection::open("skills.db")
