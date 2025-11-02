@@ -4,13 +4,15 @@ use std::time::Duration;
 
 use crate::bot::{Context, Error};
 use poise::{
-    serenity_prelude::{self as serenity, CreateActionRow, CreateButton},
     CreateReply,
+    serenity_prelude::{self as serenity, CreateActionRow, CreateButton},
 };
 
 /// 顯示指令說明
 #[poise::command(slash_command)]
 pub async fn help(ctx: Context<'_>) -> Result<(), Error> {
+    log::info!("執行 help 指令 for guild {:?}", ctx.guild_id());
+    
     let embed = serenity::CreateEmbed::default()
         .title("TRPG Discord Bot 指令說明")
         .description(
@@ -90,7 +92,9 @@ pub async fn help(ctx: Context<'_>) -> Result<(), Error> {
                     .ephemeral(true)
                     .add_embed(detail_embed);
                 let response = serenity::CreateInteractionResponse::Message(message);
-                let _ = interaction.create_response(&ctx_clone, response).await;
+                if let Err(e) = interaction.create_response(&ctx_clone, response).await {
+                    log::error!("回應 help 按鈕互動時發生錯誤: {:?}", e);
+                }
             }
         }
     });

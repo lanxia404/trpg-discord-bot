@@ -1,16 +1,21 @@
 use crate::bot::{Context, Error};
-use crate::models::types::GlobalConfig;
 use poise::{
+    ChoiceParameter, CreateReply,
     serenity_prelude::{
         self as serenity, ButtonStyle, CreateActionRow, CreateButton, CreateInteractionResponse,
         CreateInteractionResponseMessage,
     },
-    ChoiceParameter, CreateReply,
 };
 use rand::random;
-use std::ffi::OsString;
 use std::time::Duration;
 use tokio::{process::Command as TokioCommand, time::sleep};
+
+// 定義 ProcessControl 枚舉
+#[derive(Clone)]
+enum ProcessControl {
+    Execv,
+    Service { name: String },
+}
 
 #[derive(Clone, Copy, Debug, ChoiceParameter)]
 pub enum AdminAction {
@@ -33,14 +38,17 @@ pub async fn admin(
     #[description = "管理操作"] action: AdminAction,
     #[description = "要添加或移除的開發者"] user: Option<serenity::User>,
 ) -> Result<(), Error> {
+    log::info!("執行管理指令: {:?} for user {:?}, guild {:?}", action, ctx.author().id, ctx.guild_id());
+    
     let caller_id = ctx.author().id.get();
 
     let has_permission = {
         let config_manager = ctx.data().config.lock().await;
-        config_manager.is_developer(caller_id)
+        futures::executor::block_on(config_manager.is_developer(caller_id))
     };
 
     if !has_permission {
+        log::warn!("用戶 {:?} 嘗試執行管理指令但沒有權限", ctx.author().id);
         ctx.say("您沒有權限執行此操作！").await?;
         return Ok(());
     }
@@ -48,29 +56,35 @@ pub async fn admin(
     match action {
         AdminAction::Restart => {
             if !confirm_action(&ctx, "確認執行重啟操作？").await? {
+                log::info!("用戶 {:?} 取消重啟操作", ctx.author().id);
                 return Ok(());
             }
             let control = match process_control_from_config(&ctx).await {
                 Ok(control) => control,
-                Err(msg) => {
-                    ctx.say(msg).await?;
+                Err(e) => {
+                    log::error!("配置加載錯誤: {:?}", e);
+                    ctx.say("配置加載錯誤").await?;
                     return Ok(());
                 }
             };
+            log::info!("用戶 {:?} 確認執行重啟操作", ctx.author().id);
             ctx.say("已確認，機器人即將重新啟動……").await?;
             schedule_restart(control).await?;
         }
         AdminAction::Shutdown => {
             if !confirm_action(&ctx, "確認關閉機器人？").await? {
+                log::info!("用戶 {:?} 取消關閉操作", ctx.author().id);
                 return Ok(());
             }
             let control = match process_control_from_config(&ctx).await {
                 Ok(control) => control,
-                Err(msg) => {
-                    ctx.say(msg).await?;
+                Err(e) => {
+                    log::error!("配置加載錯誤: {:?}", e);
+                    ctx.say("配置加載錯誤").await?;
                     return Ok(());
                 }
             };
+            log::info!("用戶 {:?} 確認執行關閉操作", ctx.author().id);
             ctx.say("已確認，機器人即將關閉……").await?;
             schedule_shutdown(control).await?;
         }
@@ -85,15 +99,27 @@ pub async fn admin(
 
             if !confirm_action(&ctx, format!("確認將 <@{}> 新增為開發者？", user.id)).await?
             {
+                log::info!("用戶 {:?} 取消添加開發者操作", ctx.author().id);
                 return Ok(());
             }
 
-            let mut config_manager = ctx.data().config.lock().await;
-            if config_manager.add_developer(user.id.get())? {
-                ctx.say(format!("用戶 <@{}> 已添加到開發者列表", user.id))
-                    .await?;
-            } else {
-                ctx.say(format!("用戶 <@{}> 已經是開發者", user.id)).await?;
+            let config_manager = ctx.data().config.lock().await;
+            match futures::executor::block_on(config_manager.add_developer(user.id.get())) {
+                Ok(success) => {
+                    if success {
+                        log::info!("用戶 {:?} 已添加到開發者列表", user.id);
+                        ctx.say(format!("用戶 <@{}> 已添加到開發者列表", user.id))
+                            .await?;
+                    } else {
+                        log::info!("用戶 {:?} 已經是開發者", user.id);
+                        ctx.say(format!("用戶 <@{}> 已經是開發者", user.id)).await?;
+                    }
+                }
+                Err(e) => {
+                    log::error!("添加開發者時發生錯誤: {:?}", e);
+                    ctx.say("添加開發者時發生錯誤").await?;
+                    return Err(e.into());
+                }
             }
         }
         AdminAction::DevRemove => {
@@ -107,24 +133,39 @@ pub async fn admin(
 
             if !confirm_action(&ctx, format!("確認將 <@{}> 從開發者列表移除？", user.id)).await?
             {
+                log::info!("用戶 {:?} 取消移除開發者操作", ctx.author().id);
                 return Ok(());
             }
 
-            let mut config_manager = ctx.data().config.lock().await;
-            if config_manager.remove_developer(user.id.get())? {
-                ctx.say(format!("用戶 <@{}> 已從開發者列表移除", user.id))
-                    .await?;
-            } else {
-                ctx.say(format!("用戶 <@{}> 不在開發者列表中", user.id))
-                    .await?;
+            let config_manager = ctx.data().config.lock().await;
+            match futures::executor::block_on(config_manager.remove_developer(user.id.get())) {
+                Ok(success) => {
+                    if success {
+                        log::info!("用戶 {:?} 已從開發者列表移除", user.id);
+                        ctx.say(format!("用戶 <@{}> 已從開發者列表移除", user.id))
+                            .await?;
+                    } else {
+                        log::info!("用戶 {:?} 不在開發者列表中", user.id);
+                        ctx.say(format!("用戶 <@{}> 不在開發者列表中", user.id))
+                            .await?;
+                    }
+                }
+                Err(e) => {
+                    log::error!("移除開發者時發生錯誤: {:?}", e);
+                    ctx.say("移除開發者時發生錯誤").await?;
+                    return Err(e.into());
+                }
             }
         }
         AdminAction::DevList => {
             let config_manager = ctx.data().config.lock().await;
-            let developers = &config_manager.global.developers;
+            let global_config = config_manager.get_global_config().await;
+            let developers = &global_config.developers;
             if developers.is_empty() {
+                log::info!("查詢開發者列表，結果為空");
                 ctx.say("目前沒有開發者").await?;
             } else {
+                log::info!("查詢開發者列表，共有 {} 位開發者", developers.len());
                 let mut list = String::from("開發者列表:\n");
                 for dev_id in developers {
                     list.push_str(&format!("<@{}>\n", dev_id));
@@ -200,185 +241,161 @@ async fn confirm_action(ctx: &Context<'_>, prompt: impl Into<String>) -> Result<
 }
 
 async fn schedule_restart(control: ProcessControl) -> Result<(), Error> {
-    tokio::spawn(async move {
-        sleep(Duration::from_millis(500)).await;
-        if let Err(err) = perform_restart(control).await {
-            eprintln!("Restart failed: {}", err);
+    match control {
+        ProcessControl::Execv => {
+            tokio::spawn(async {
+                sleep(Duration::from_millis(500)).await;
+                #[cfg(target_family = "unix")]
+                {
+                    use std::env;
+                    use std::os::unix::process::CommandExt;
+                    let exe = match env::current_exe() {
+                        Ok(path) => path,
+                        Err(e) => {
+                            eprintln!("Failed to get current executable path: {}", e);
+                            std::process::exit(1);
+                        }
+                    };
+                    let args: Vec<String> = env::args().collect();
+                    let _ = std::process::Command::new(exe).args(&args[1..]).exec();
+                }
+
+                #[cfg(target_family = "windows")]
+                {
+                    // Windows doesn't have execv, so we'll spawn a new process and exit the current one
+                    use std::env;
+                    let exe = match env::current_exe() {
+                        Ok(path) => path,
+                        Err(e) => {
+                            eprintln!("Failed to get current executable path: {}", e);
+                            std::process::exit(1);
+                        }
+                    };
+                    let args: Vec<String> = env::args().collect();
+                    if let Err(e) = std::process::Command::new(exe).args(&args[1..]).spawn() {
+                        eprintln!("Failed to spawn new process: {}", e);
+                    }
+                }
+                std::process::exit(0);
+            });
         }
-    });
+        ProcessControl::Service { name } => {
+            tokio::spawn(async move {
+                sleep(Duration::from_millis(500)).await;
+                #[cfg(target_family = "windows")]
+                {
+                    match TokioCommand::new("sc").args(["stop", &name]).status().await {
+                        Ok(_) => {
+                            match TokioCommand::new("sc")
+                                .args(["start", &name])
+                                .status()
+                                .await
+                            {
+                                Ok(_) => std::process::exit(0),
+                                Err(err) => {
+                                    eprintln!("服務重啟失敗: {}", err);
+                                    std::process::exit(1);
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            eprintln!("服務停止失敗: {}", err);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+
+                #[cfg(target_family = "unix")]
+                {
+                    match TokioCommand::new("systemctl")
+                        .arg("restart")
+                        .arg(&name)
+                        .status()
+                        .await
+                    {
+                        Ok(status) if status.success() => std::process::exit(0),
+                        Ok(status) => {
+                            eprintln!(
+                                "systemctl restart {} 失敗，狀態碼 {:?}",
+                                name,
+                                status.code()
+                            );
+                            std::process::exit(status.code().unwrap_or(1));
+                        }
+                        Err(err) => {
+                            eprintln!("systemctl restart {} 執行失敗: {}", name, err);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+            });
+        }
+    }
     Ok(())
 }
 
 async fn schedule_shutdown(control: ProcessControl) -> Result<(), Error> {
-    tokio::spawn(async move {
-        sleep(Duration::from_millis(500)).await;
-        if let Err(err) = perform_shutdown(control).await {
-            eprintln!("Shutdown failed: {}", err);
+    match control {
+        ProcessControl::Execv => {
+            // 延遲後退出程序，讓響應能發送出去
+            tokio::spawn(async {
+                sleep(Duration::from_millis(500)).await;
+                std::process::exit(0);
+            });
         }
-    });
-    Ok(())
-}
+        ProcessControl::Service { name } => {
+            // 在服務模式下，使用系統服務管理器關閉服務
+            #[cfg(target_family = "windows")]
+            {
+                match TokioCommand::new("sc").args(["stop", &name]).status().await {
+                    Ok(_) => std::process::exit(0),
+                    Err(err) => {
+                        eprintln!("服務停止失敗: {}", err);
+                        std::process::exit(1);
+                    }
+                }
+            }
 
-async fn process_control_from_config(ctx: &Context<'_>) -> Result<ProcessControl, String> {
-    let config_manager = ctx.data().config.lock().await;
-    map_global_to_control(&config_manager.global)
-}
-
-fn map_global_to_control(global: &GlobalConfig) -> Result<ProcessControl, String> {
-    match global.restart_mode.as_str() {
-        "spawn" => Ok(ProcessControl::Spawn),
-        "service" => {
-            let name = global
-                .restart_service
-                .as_ref()
-                .map(|value| value.trim())
-                .filter(|value| !value.is_empty())
-                .map(|value| value.to_string());
-            if let Some(name) = name {
-                Ok(ProcessControl::Service { name })
-            } else {
-                Err("設定錯誤：restart_service 尚未設定，無法操作服務".to_string())
+            #[cfg(target_family = "unix")]
+            {
+                match TokioCommand::new("systemctl")
+                    .arg("stop")
+                    .arg(&name)
+                    .status()
+                    .await
+                {
+                    Ok(status) if status.success() => std::process::exit(0),
+                    Ok(status) => {
+                        eprintln!("systemctl stop {} 失敗，狀態碼 {:?}", name, status.code());
+                        std::process::exit(status.code().unwrap_or(1));
+                    }
+                    Err(err) => {
+                        eprintln!("systemctl stop {} 執行失敗: {}", name, err);
+                        std::process::exit(1);
+                    }
+                }
             }
         }
         _ => Ok(ProcessControl::Execv),
     }
 }
 
-async fn perform_restart(control: ProcessControl) -> Result<(), String> {
-    match control {
-        ProcessControl::Execv => restart_with_exec(),
-        ProcessControl::Spawn => restart_with_spawn(),
-        ProcessControl::Service { name } => {
-            control_service(&name, ServiceAction::Restart).await?;
-            std::process::exit(0);
-            #[allow(unreachable_code)]
-            Ok(())
+async fn process_control_from_config(ctx: &Context<'_>) -> Result<ProcessControl, Error> {
+    let config_manager = ctx.data().config.lock().await;
+    let global_config = config_manager.get_global_config().await;
+
+    if global_config.restart_mode == "service" {
+        if let Some(service_name) = &global_config.restart_service {
+            Ok(ProcessControl::Service {
+                name: service_name.clone(),
+            })
+        } else {
+            Err(anyhow::anyhow!(
+                "restart_mode 為 service 時，必須設定 restart_service"
+            ))
         }
-    }
-}
-
-async fn perform_shutdown(control: ProcessControl) -> Result<(), String> {
-    match control {
-        ProcessControl::Service { name } => {
-            control_service(&name, ServiceAction::Stop).await?;
-            std::process::exit(0);
-            #[allow(unreachable_code)]
-            Ok(())
-        }
-        ProcessControl::Execv | ProcessControl::Spawn => {
-            std::process::exit(0);
-            #[allow(unreachable_code)]
-            Ok(())
-        }
-    }
-}
-
-fn restart_with_exec() -> Result<(), String> {
-    #[cfg(target_family = "unix")]
-    {
-        let (exe, args) = current_command()?;
-        use std::os::unix::process::CommandExt;
-        let err = std::process::Command::new(exe).args(args).exec();
-        Err(format!("process replacement failed: {}", err))
-    }
-
-    #[cfg(not(target_family = "unix"))]
-    {
-        restart_with_spawn()
-    }
-}
-
-fn restart_with_spawn() -> Result<(), String> {
-    let (exe, args) = current_command()?;
-    std::process::Command::new(exe)
-        .args(args)
-        .spawn()
-        .map_err(|err| format!("failed to spawn replacement process: {}", err))?;
-    std::process::exit(0);
-    #[allow(unreachable_code)]
-    Ok(())
-}
-
-fn current_command() -> Result<(std::path::PathBuf, Vec<OsString>), String> {
-    let exe = std::env::current_exe()
-        .map_err(|err| format!("unable to resolve executable path: {}", err))?;
-    let args: Vec<OsString> = std::env::args_os().skip(1).collect();
-    Ok((exe, args))
-}
-
-#[derive(Clone)]
-enum ProcessControl {
-    Execv,
-    Spawn,
-    Service { name: String },
-}
-
-#[derive(Clone, Copy)]
-enum ServiceAction {
-    Restart,
-    Stop,
-}
-
-async fn control_service(name: &str, action: ServiceAction) -> Result<(), String> {
-    #[cfg(target_family = "windows")]
-    {
-        async fn run_sc(subcommand: &str, name: &str) -> Result<(), String> {
-            let status = TokioCommand::new("sc")
-                .arg(subcommand)
-                .arg(name)
-                .status()
-                .await
-                .map_err(|err| format!("failed to run sc {} {}: {}", subcommand, name, err))?;
-            if status.success() {
-                Ok(())
-            } else {
-                Err(format!(
-                    "sc {} {} exited with status {:?}",
-                    subcommand, name, status
-                ))
-            }
-        }
-
-        match action {
-            ServiceAction::Restart => {
-                run_sc("stop", name).await?;
-                run_sc("start", name).await?;
-            }
-            ServiceAction::Stop => {
-                run_sc("stop", name).await?;
-            }
-        }
-        return Ok(());
-    }
-
-    #[cfg(target_family = "unix")]
-    {
-        let verb = match action {
-            ServiceAction::Restart => "restart",
-            ServiceAction::Stop => "stop",
-        };
-
-        let status = TokioCommand::new("systemctl")
-            .arg(verb)
-            .arg(name)
-            .status()
-            .await
-            .map_err(|err| format!("failed to execute systemctl {} {}: {}", verb, name, err))?;
-
-        if status.success() {
-            return Ok(());
-        }
-
-        return Err(format!(
-            "systemctl {} {} exited with status {:?}",
-            verb, name, status
-        ));
-    }
-
-    #[cfg(not(any(target_family = "unix", target_family = "windows")))]
-    {
-        let _ = name;
-        let _ = action;
-        Err("service control is not supported on this platform".to_string())
+    } else {
+        // 預設使用 execv 模式
+        Ok(ProcessControl::Execv)
     }
 }

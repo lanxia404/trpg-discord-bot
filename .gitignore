@@ -20,9 +20,7 @@ target
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-
 # Added by cargo
-
 /target
 
 # Qwen Code related files
@@ -36,4 +34,14 @@ config.json
 
 # SQL database files
 *.sqlite
-*.db*
+*.db
+
+# IDE specific
+.idea/
+*.swp
+*.swo
+*~
+
+# Runtime specific
+.DS_Store
+Thumbs.db

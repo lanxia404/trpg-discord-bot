@@ -2,7 +2,7 @@ use crate::bot::{Context, Error};
 use crate::models::types::RollResult;
 use crate::utils::coc::{determine_success_level, format_success_level, roll_coc_multi};
 use crate::utils::dice::roll_multiple_dice;
-use poise::{serenity_prelude as serenity, CreateReply};
+use poise::{CreateReply, serenity_prelude as serenity};
 use serenity::model::prelude::Mentionable;
 
 /// D&D 骰子指令 - 擲骰子
@@ -11,13 +11,17 @@ pub async fn roll(
     ctx: Context<'_>,
     #[description = "骰子表達式 (例如: 2d20+5, d10, 1d6>=15)"] expression: String,
 ) -> Result<(), Error> {
+    log::info!("執行 D&D 擲骰: {} for guild {:?}", expression, ctx.guild_id());
+    
     let rules = {
         let data = ctx.data();
         let config_handle = data.config.lock().await;
         let guild_id = ctx.guild_id().map(|id| id.get());
-        let guild_config = guild_id
-            .map(|id| config_handle.get_guild_config(id))
-            .unwrap_or_default();
+        let guild_config = if let Some(id) = guild_id {
+            futures::executor::block_on(config_handle.get_guild_config(id))
+        } else {
+            Default::default()
+        };
         guild_config.dnd_rules
     };
 
@@ -47,6 +51,7 @@ pub async fn roll(
             }
         }
         Err(e) => {
+            log::error!("D&D 擲骰錯誤: {} - 表達式: {}", e, expression);
             send_embed(&ctx, "D&D 擲骰錯誤", format!("錯誤: {}", e)).await?;
         }
     }
@@ -67,6 +72,8 @@ pub async fn coc(
     #[max = 10]
     times: Option<u8>,
 ) -> Result<(), Error> {
+    log::info!("執行 CoC 擲骰: 技能值={}, 次數={:?}", skill, times);
+    
     let guild_id = match ctx.guild_id() {
         Some(id) => id.get(),
         None => {
@@ -78,7 +85,7 @@ pub async fn coc(
     let rules = {
         let data = ctx.data();
         let config_handle = data.config.lock().await;
-        config_handle.get_guild_config(guild_id).coc_rules
+        futures::executor::block_on(config_handle.get_guild_config(guild_id)).coc_rules
     };
 
     let times = times.unwrap_or(1);
@@ -316,7 +323,7 @@ async fn log_critical_events(
     let (success_channel, fail_channel) = {
         let data = ctx.data();
         let manager = data.config.lock().await;
-        let cfg = manager.get_guild_config(guild_id.get());
+        let cfg = futures::executor::block_on(manager.get_guild_config(guild_id.get()));
         (cfg.crit_success_channel, cfg.crit_fail_channel)
     };
 
@@ -338,7 +345,7 @@ async fn log_critical_events(
         let builder = serenity::CreateMessage::new().embed(embed);
 
         if let Err(err) = channel.send_message(http, builder).await {
-            eprintln!("發送關鍵紀錄失敗: {:?}", err);
+            log::warn!("發送關鍵紀錄失敗: {:?}", err);
         }
     }
 

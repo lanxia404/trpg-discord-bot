@@ -5,16 +5,16 @@
 ## 功能特性
 
 - **擲骰系統**：支援 D&D 和 CoC 7e 擲骰
-- **日誌系統**：即時串流和批次日誌記錄
+- **日誌系統**：即時串流和批次日誌記錄，自動抑制重複和噪音日誌
 - **管理功能**：重啟機器人、管理開發者等
 - **配置管理**：JSON 格式的持久化配置
 
-## 技術特點
+## 特點
 
 - 使用 Rust 編程語言確保內存安全和高性能
-- 基於 [poise](https://github.com/serenity-rs/poise) 框架構建，提供現代化的 Slash 指令體驗
-- 模塊化設計便於擴展
-- 透過 `.env` 管理敏感設定，並內建 JSON 配置持久化
+- 基於 [poise](https://github.com/serenity-rs/poise) 框架構建，提供斜線指令支援
+- 模塊化設計利於擴展
+- 透過 `.env` 管理敏感設定，並內建 JSON 配置持久化，~~不像某個只會用AI的國中生，還說什麼.json比.env安全~~
 
 ## 編譯和運行
 
@@ -35,7 +35,7 @@ cargo run --release
 
 ### 與系統服務整合
 
-若機器人以 systemd 等服務管理器啟動，可在 `config.json` 的 `global` 區段設定：
+若機器人以服務管理器啟動，可在 `config.json` 的 `global` 區段設定：
 
 ```json
 {
@@ -44,10 +44,15 @@ cargo run --release
 }
 ```
 
-- `restart_mode`：`execv`（預設）會直接以原參數重新啟動程序；`service` 會透過 `systemctl restart/stop` 控制指定服務。
-- `restart_service`：當 `restart_mode` 為 `service` 時必填，為 systemd 服務名稱。
+- `restart_mode`：`execv`（預設）會嘗試重新啟動程序（Unix 使用 execv，Windows 會啟動新實例後退出）；`service` 會透過平台特定的服務管理工具控制指定服務。
+- `restart_service`：當 `restart_mode` 為 `service` 時必填，為服務名稱。
 
-完成設定後，`/admin restart` 與 `/admin shutdown` 將呼叫對應的 `systemctl restart/stop`，確保服務受系統管理。
+根據平台不同，機器人會使用對應的服務管理工具：
+
+- **Linux**：使用 `systemctl restart/stop` 控制服務
+- **Windows**：使用 `sc stop/start` 控制服務
+
+完成設定後，`/admin restart` 與 `/admin shutdown` 將呼叫對應的平台服務管理命令，確保服務受系統管理。
 
 ## 指令列表
 
@@ -55,8 +60,8 @@ cargo run --release
 
 - `/roll <骰子表達式>` - D&D 擲骰
 - `/coc <技能值> [次數]` - CoC 7e 擲骰，支援 1-10 次連續判定
-- `/skill add <名稱> <類型> <等級> <效果>` - 新增或更新個人技能
-- `/skill show <名稱>` - 支援模糊搜尋技能名稱，查詢自己的技能
+- `/skill add <名稱> <類型> <等級> <效果> [職業] [種族]` - 新增或更新個人技能
+- `/skill show <名稱>` - 支援模糊搜尋技能名稱、類型、等級、職業、種族，查詢自己的技能
 - `/skill delete <名稱>` - 刪除此伺服器中符合的技能（含其他玩家），需要按鈕確認
 
 ### 日誌指令

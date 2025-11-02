@@ -14,5 +14,6 @@ pub fn commands() -> Vec<poise::Command<data::BotData, Error>> {
         commands::skills::skill(),
         commands::admin::admin(),
         commands::help::help(),
+        commands::import::import_data(),
     ]
 }

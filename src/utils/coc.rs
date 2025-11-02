@@ -1,7 +1,7 @@
 use crate::models::types::{CoCRules, RollResult};
 use rand::Rng;
 
-/// Roll for Call of Cthulhu 7th edition
+/// CoC 7e擲骰
 pub fn roll_coc(skill_value: u8, rules: &CoCRules) -> RollResult {
     let roll = rand::thread_rng().gen_range(1..=100);
 
@@ -21,49 +21,49 @@ pub fn roll_coc(skill_value: u8, rules: &CoCRules) -> RollResult {
     }
 }
 
-/// Roll multiple times for Call of Cthulhu 7th edition
+/// 連續擲多次CoC 7e骰
 pub fn roll_coc_multi(skill_value: u8, times: u8, rules: &CoCRules) -> Vec<RollResult> {
     let count = times.max(1);
     (0..count).map(|_| roll_coc(skill_value, rules)).collect()
 }
 
-/// Determine the success level according to CoC 7e rules
-/// Returns: 1=critical success, 2=extreme success, 3=hard success, 4=regular success, 5=failure, 6=critical failure
+/// 根據CoC 7e規則判定成功等級
+/// 1: 大成功 (Critical Success)、2: 極限成功 (Extreme Success)、3: 困難成功 (Hard Success)、4: 普通成功 (Regular Success)、5: 失敗 (Failure)、6: 大失敗 (Critical Failure)
 pub fn determine_success_level(roll: u16, skill_value: u8, rules: &CoCRules) -> u8 {
     if roll == rules.critical_success as u16 {
-        return 1; // Critical success
+        return 1; // 大成功 (Critical success)
     }
 
     if is_critical_failure(roll, skill_value, rules) {
-        return 6; // Critical failure
+        return 6; // 大失敗 (Critical failure)
     }
 
     let hard_success_threshold = skill_value as f32 / rules.skill_divisor_hard as f32;
     let extreme_success_threshold = skill_value as f32 / rules.skill_divisor_extreme as f32;
 
     if roll == 100 || roll <= extreme_success_threshold as u16 {
-        2 // Extreme success
+        2 // 極限成功 (Extreme success)
     } else if roll <= hard_success_threshold as u16 {
-        3 // Hard success
+        3 // 困難成功 (Hard success)
     } else if roll <= skill_value as u16 {
-        4 // Regular success
+        4 // 普通成功 (Regular success)
     } else {
-        5 // Failure
+        5 // 失敗 (Failure)
     }
 }
 
-/// Check if the roll is a critical failure according to CoC 7e rules
+/// 大失敗判定標準
 pub fn is_critical_failure(roll: u16, skill_value: u8, rules: &CoCRules) -> bool {
     if skill_value < 50 {
-        // For skills under 50%, rolls 96-100 are critical failures
+        // 技能值低於50%，96-100為大失敗
         roll >= 96
     } else {
-        // For skills 50% or higher, only roll 100 is a critical failure
+        // 技能值50%或以上，100才算大失敗
         roll == rules.critical_fail as u16
     }
 }
 
-/// Format the success level as a string
+/// 格式化成功等級為字串
 pub fn format_success_level(level: u8) -> String {
     match level {
         1 => "大成功 (Critical Success)".to_string(),
