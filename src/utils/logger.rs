@@ -60,10 +60,10 @@ impl DiscordLogger {
         println!("{}", message);
         Self::ensure_capacity(state, message.len() + 1);
 
-        if let Some(file) = state.file.as_mut()
-            && let Err(e) = writeln!(file, "{}", message)
-        {
-            eprintln!("Failed to write log entry: {}", e);
+        if let Some(file) = state.file.as_mut() {
+            if let Err(e) = writeln!(file, "{}", message) {
+                eprintln!("Failed to write log entry: {}", e);
+            }
         }
     }
 
@@ -202,17 +202,18 @@ impl Log for DiscordLogger {
         let entry = format!("{}: {}", record.level(), message);
         let mut state = self.state.lock().expect("logger mutex poisoned");
 
-        if let Some(last) = &state.last_entry
-            && last == &entry
-        {
-            state.repeat_count = state.repeat_count.saturating_add(1);
+        if let Some(last) = &state.last_entry {
+            if last == &entry {
+                state.repeat_count = state.repeat_count.saturating_add(1);
 
-            if state.repeat_count >= SUPPRESS_THRESHOLD {
-                let summary = format!("(previous message repeated {} times)", state.repeat_count);
-                Self::write_message(&mut state, &summary);
-                state.repeat_count = 0;
+                if state.repeat_count >= SUPPRESS_THRESHOLD {
+                    let summary =
+                        format!("(previous message repeated {} times)", state.repeat_count);
+                    Self::write_message(&mut state, &summary);
+                    state.repeat_count = 0;
+                }
+                return;
             }
-            return;
         }
 
         Self::emit_repeat_summary(&mut state);

@@ -376,8 +376,8 @@ async fn schedule_shutdown(control: ProcessControl) -> Result<(), Error> {
                 }
             }
         }
+        _ => Ok(ProcessControl::Execv),
     }
-    Ok(())
 }
 
 async fn process_control_from_config(ctx: &Context<'_>) -> Result<ProcessControl, Error> {
