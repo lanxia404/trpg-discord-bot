@@ -28,7 +28,7 @@ fn detect_file_type(filename: &str, content_type: &str) -> FileType {
 }
 
 /// 從雲端獲取文件並導入至機器人資料庫
-#[poise::command(slash_command, guild_only)]
+#[poise::command(slash_command)]
 pub async fn import_data(
     ctx: Context<'_>,
     #[description = "文件的 URL 或共享連結"] url: String,
