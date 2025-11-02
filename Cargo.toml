@@ -37,7 +37,7 @@ csv = "1.4"
 calamine = "0.31"   # 讀 Excel，配合 2024 edition 沒問題
 
 # HTTP 用 rustls，避免 Linux 上 OpenSSL 依賴雜訊；也打開常見解壓功能
-reqwest = { version = "0.12.24", features = ["rustls-tls", "http2", "json", "gzip", "brotli", "deflate", "zstd"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "http2", "json", "gzip", "brotli", "deflate", "zstd"] }
 
 # UUID 生成
 uuid = { version = "1.0", features = ["v4"] }
