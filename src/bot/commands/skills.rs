@@ -41,6 +41,7 @@ pub async fn skill(
     #[description = "職業 (add 選填)"] occupation: Option<String>,
     #[description = "種族 (add 選填)"] race: Option<String>,
 ) -> Result<(), Error> {
+    log::info!("執行技能指令: {:?} for guild {:?}", action, ctx.guild_id());
     let guild_id = match ctx.guild_id() {
         Some(id) => id.get(),
         None => {

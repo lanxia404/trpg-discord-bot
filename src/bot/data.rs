@@ -3,7 +3,7 @@ use tokio::sync::Mutex;
 
 use crate::utils::config::ConfigManager;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct BotData {
     pub config: Arc<Mutex<ConfigManager>>,
     pub skills_db: tokio_rusqlite::Connection,

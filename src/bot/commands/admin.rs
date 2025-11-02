@@ -38,6 +38,8 @@ pub async fn admin(
     #[description = "管理操作"] action: AdminAction,
     #[description = "要添加或移除的開發者"] user: Option<serenity::User>,
 ) -> Result<(), Error> {
+    log::info!("執行管理指令: {:?} for user {:?}, guild {:?}", action, ctx.author().id, ctx.guild_id());
+    
     let caller_id = ctx.author().id.get();
 
     let has_permission = {
@@ -46,6 +48,7 @@ pub async fn admin(
     };
 
     if !has_permission {
+        log::warn!("用戶 {:?} 嘗試執行管理指令但沒有權限", ctx.author().id);
         ctx.say("您沒有權限執行此操作！").await?;
         return Ok(());
     }
@@ -53,29 +56,35 @@ pub async fn admin(
     match action {
         AdminAction::Restart => {
             if !confirm_action(&ctx, "確認執行重啟操作？").await? {
+                log::info!("用戶 {:?} 取消重啟操作", ctx.author().id);
                 return Ok(());
             }
             let control = match process_control_from_config(&ctx).await {
                 Ok(control) => control,
-                Err(_) => {
+                Err(e) => {
+                    log::error!("配置加載錯誤: {:?}", e);
                     ctx.say("配置加載錯誤").await?;
                     return Ok(());
                 }
             };
+            log::info!("用戶 {:?} 確認執行重啟操作", ctx.author().id);
             ctx.say("已確認，機器人即將重新啟動……").await?;
             schedule_restart(control).await?;
         }
         AdminAction::Shutdown => {
             if !confirm_action(&ctx, "確認關閉機器人？").await? {
+                log::info!("用戶 {:?} 取消關閉操作", ctx.author().id);
                 return Ok(());
             }
             let control = match process_control_from_config(&ctx).await {
                 Ok(control) => control,
-                Err(_) => {
+                Err(e) => {
+                    log::error!("配置加載錯誤: {:?}", e);
                     ctx.say("配置加載錯誤").await?;
                     return Ok(());
                 }
             };
+            log::info!("用戶 {:?} 確認執行關閉操作", ctx.author().id);
             ctx.say("已確認，機器人即將關閉……").await?;
             schedule_shutdown(control).await?;
         }
@@ -90,15 +99,27 @@ pub async fn admin(
 
             if !confirm_action(&ctx, format!("確認將 <@{}> 新增為開發者？", user.id)).await?
             {
+                log::info!("用戶 {:?} 取消添加開發者操作", ctx.author().id);
                 return Ok(());
             }
 
             let config_manager = ctx.data().config.lock().await;
-            if futures::executor::block_on(config_manager.add_developer(user.id.get()))? {
-                ctx.say(format!("用戶 <@{}> 已添加到開發者列表", user.id))
-                    .await?;
-            } else {
-                ctx.say(format!("用戶 <@{}> 已經是開發者", user.id)).await?;
+            match futures::executor::block_on(config_manager.add_developer(user.id.get())) {
+                Ok(success) => {
+                    if success {
+                        log::info!("用戶 {:?} 已添加到開發者列表", user.id);
+                        ctx.say(format!("用戶 <@{}> 已添加到開發者列表", user.id))
+                            .await?;
+                    } else {
+                        log::info!("用戶 {:?} 已經是開發者", user.id);
+                        ctx.say(format!("用戶 <@{}> 已經是開發者", user.id)).await?;
+                    }
+                }
+                Err(e) => {
+                    log::error!("添加開發者時發生錯誤: {:?}", e);
+                    ctx.say("添加開發者時發生錯誤").await?;
+                    return Err(e.into());
+                }
             }
         }
         AdminAction::DevRemove => {
@@ -112,16 +133,28 @@ pub async fn admin(
 
             if !confirm_action(&ctx, format!("確認將 <@{}> 從開發者列表移除？", user.id)).await?
             {
+                log::info!("用戶 {:?} 取消移除開發者操作", ctx.author().id);
                 return Ok(());
             }
 
             let config_manager = ctx.data().config.lock().await;
-            if futures::executor::block_on(config_manager.remove_developer(user.id.get()))? {
-                ctx.say(format!("用戶 <@{}> 已從開發者列表移除", user.id))
-                    .await?;
-            } else {
-                ctx.say(format!("用戶 <@{}> 不在開發者列表中", user.id))
-                    .await?;
+            match futures::executor::block_on(config_manager.remove_developer(user.id.get())) {
+                Ok(success) => {
+                    if success {
+                        log::info!("用戶 {:?} 已從開發者列表移除", user.id);
+                        ctx.say(format!("用戶 <@{}> 已從開發者列表移除", user.id))
+                            .await?;
+                    } else {
+                        log::info!("用戶 {:?} 不在開發者列表中", user.id);
+                        ctx.say(format!("用戶 <@{}> 不在開發者列表中", user.id))
+                            .await?;
+                    }
+                }
+                Err(e) => {
+                    log::error!("移除開發者時發生錯誤: {:?}", e);
+                    ctx.say("移除開發者時發生錯誤").await?;
+                    return Err(e.into());
+                }
             }
         }
         AdminAction::DevList => {
@@ -129,8 +162,10 @@ pub async fn admin(
             let global_config = config_manager.get_global_config().await;
             let developers = &global_config.developers;
             if developers.is_empty() {
+                log::info!("查詢開發者列表，結果為空");
                 ctx.say("目前沒有開發者").await?;
             } else {
+                log::info!("查詢開發者列表，共有 {} 位開發者", developers.len());
                 let mut list = String::from("開發者列表:\n");
                 for dev_id in developers {
                     list.push_str(&format!("<@{}>\n", dev_id));

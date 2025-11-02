@@ -174,6 +174,19 @@ impl Log for DiscordLogger {
                 "handle_gateway_dispatch",
                 "build; self=Request",
                 "InteractionCreate",
+                "heartbeat;",
+                "send_heartbeat;",
+                "update_manager;",
+                "latency;",
+                "start_connection;",
+                "set_shards;",
+                "shutdown_all;",
+                "Telling shard queuer",
+                "checked_start;",
+                "check_last_start;",
+                "[ShardRunner",
+                "action;",
+                "send_identify;",
             ])
         });
 

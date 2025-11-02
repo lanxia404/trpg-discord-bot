@@ -44,6 +44,8 @@ pub async fn log_stream(
     #[channel_types("Text")]
     channel: Option<serenity::ChannelId>,
 ) -> Result<(), Error> {
+    log::info!("執行日誌串流指令: {:?} for guild {:?}", state, ctx.guild_id());
+    
     let guild_id = match ctx.guild_id() {
         Some(id) => id.get(),
         None => {
@@ -65,14 +67,32 @@ pub async fn log_stream(
                 }
             };
             guild_config.log_channel = Some(channel.get());
-            futures::executor::block_on(config_manager.set_guild_config(guild_id, guild_config))?;
-            ctx.say(format!("日誌串流已開啟，使用頻道: <#{}>", channel))
-                .await?;
+            match futures::executor::block_on(config_manager.set_guild_config(guild_id, guild_config)) {
+                Ok(_) => {
+                    log::info!("日誌串流已設定到頻道: {}", channel.get());
+                    ctx.say(format!("日誌串流已開啟，使用頻道: <#{}>", channel))
+                        .await?;
+                }
+                Err(e) => {
+                    log::error!("設定日誌串流設定失敗: {:?}", e);
+                    ctx.say("設定日誌串流時發生錯誤").await?;
+                    return Err(e.into());
+                }
+            }
         }
         StreamToggle::Off => {
             guild_config.log_channel = None;
-            futures::executor::block_on(config_manager.set_guild_config(guild_id, guild_config))?;
-            ctx.say("日誌串流已關閉").await?;
+            match futures::executor::block_on(config_manager.set_guild_config(guild_id, guild_config)) {
+                Ok(_) => {
+                    log::info!("日誌串流已關閉 for guild {}", guild_id);
+                    ctx.say("日誌串流已關閉").await?;
+                }
+                Err(e) => {
+                    log::error!("關閉日誌串流設定失敗: {:?}", e);
+                    ctx.say("關閉日誌串流時發生錯誤").await?;
+                    return Err(e.into());
+                }
+            }
         }
     }
 
@@ -85,6 +105,8 @@ pub async fn log_stream_mode(
     ctx: Context<'_>,
     #[description = "串流模式 (live 或 batch)"] mode: StreamModeChoice,
 ) -> Result<(), Error> {
+    log::info!("執行日誌串流模式指令: {:?} for guild {:?}", mode, ctx.guild_id());
+    
     let guild_id = match ctx.guild_id() {
         Some(id) => id.get(),
         None => {
@@ -96,13 +118,23 @@ pub async fn log_stream_mode(
     let config_manager = ctx.data().config.lock().await;
     let mut guild_config = futures::executor::block_on(config_manager.get_guild_config(guild_id));
     guild_config.stream_mode = mode.into();
-    futures::executor::block_on(config_manager.set_guild_config(guild_id, guild_config))?;
-
-    let mode_text = match mode {
-        StreamModeChoice::Live => "live",
-        StreamModeChoice::Batch => "batch",
-    };
-    ctx.say(format!("串流模式已設定為: {}", mode_text)).await?;
+    
+    match futures::executor::block_on(config_manager.set_guild_config(guild_id, guild_config)) {
+        Ok(_) => {
+            let mode_text = match mode {
+                StreamModeChoice::Live => "live",
+                StreamModeChoice::Batch => "batch",
+            };
+            log::info!("串流模式已設定為: {} for guild {}", mode_text, guild_id);
+            ctx.say(format!("串流模式已設定為: {}", mode_text)).await?;
+        }
+        Err(e) => {
+            log::error!("設定串流模式失敗: {:?}", e);
+            ctx.say("設定串流模式時發生錯誤").await?;
+            return Err(e.into());
+        }
+    }
+    
     Ok(())
 }
 
@@ -115,6 +147,8 @@ pub async fn crit(
     #[channel_types("Text")]
     channel: Option<serenity::ChannelId>,
 ) -> Result<(), Error> {
+    log::info!("執行 crit 設定指令: {:?} for guild {:?}", kind, ctx.guild_id());
+    
     let guild_id = match ctx.guild_id() {
         Some(id) => id.get(),
         None => {
@@ -135,19 +169,28 @@ pub async fn crit(
     };
 
     *field = channel.map(|ch| ch.get());
-    futures::executor::block_on(manager.set_guild_config(guild_id, guild_config))?;
-    drop(manager);
+    
+    match futures::executor::block_on(manager.set_guild_config(guild_id, guild_config)) {
+        Ok(_) => {
+            drop(manager);
+            let description = match channel {
+                Some(ch) => format!("已設定{}紀錄頻道為 <#{}>", label, ch),
+                None => format!("已清除{}紀錄頻道設定", label),
+            };
 
-    let description = match channel {
-        Some(ch) => format!("已設定{}紀錄頻道為 <#{}>", label, ch),
-        None => format!("已清除{}紀錄頻道設定", label),
-    };
-
-    let embed = serenity::CreateEmbed::default()
-        .title("紀錄頻道已更新")
-        .description(description)
-        .colour(serenity::Colour::BLURPLE);
-    ctx.send(CreateReply::default().embed(embed)).await?;
+            log::info!("Crit 頻道設定更新: {}", description);
+            
+            let embed = serenity::CreateEmbed::default()
+                .title("紀錄頻道已更新")
+                .description(description)
+                .colour(serenity::Colour::BLURPLE);
+            ctx.send(CreateReply::default().embed(embed)).await?;
+        }
+        Err(e) => {
+            log::error!("設定 crit 頻道失敗: {:?}", e);
+            return Err(e.into());
+        }
+    }
 
     Ok(())
 }

@@ -49,44 +49,42 @@ impl ConfigManager {
         let guilds = Arc::clone(&self.guilds);
         let reload_tx = self.reload_tx.clone();
 
-        // 创建异步watcher
+        // 建立文件監視器
         let (tx, rx) = std::sync::mpsc::channel();
         let mut watcher = recommended_watcher(tx)?;
         watcher.watch(Path::new(&config_path), RecursiveMode::NonRecursive)?;
 
-        // 在后台线程中处理文件变化
+        // 後臺線程監視文件變化
         std::thread::spawn(move || {
             for res in rx {
                 match res {
                     Ok(event) => {
                         if matches!(event.kind, EventKind::Modify(_)) {
-                            // 等待一小段时间以确保文件写入完成
                             std::thread::sleep(std::time::Duration::from_millis(100));
-                            
-                            // 重新加载配置
+                            // 重新載入配置
                             if let Ok(content) = std::fs::read_to_string(&config_path) {
                                 if let Ok(config_data) = serde_json::from_str::<ConfigData>(&content) {
-                                    // 更新全局配置
+                                    // 全域
                                     let mut global_write = futures::executor::block_on(global.write());
                                     *global_write = config_data.global.unwrap_or_default();
                                     
-                                    // 更新公会配置
+                                    // 群組
                                     let mut guilds_write = futures::executor::block_on(guilds.write());
                                     *guilds_write = config_data.guilds.unwrap_or_default();
                                     
-                                    // 发送重载信号
+                                    // 發送重載通知
                                     let _ = reload_tx.send(());
-                                    log::info!("配置文件已热重载: {}", config_path);
+                                    log::info!("配置文件已重新加載: {}", config_path);
                                 }
                             }
                         }
                     }
-                    Err(e) => log::error!("配置监视器错误: {:?}", e),
+                    Err(e) => log::error!("配置監視器錯誤: {:?}", e),
                 }
             }
         });
 
-        // 存储watcher实例
+        // 保存watcher
         let mut watcher_guard = self._watcher.lock().unwrap();
         *watcher_guard = Some(watcher);
 
@@ -172,7 +170,7 @@ struct ConfigData {
     guilds: Option<HashMap<u64, GuildConfig>>,
 }
 
-// 添加一个用于测试异步访问的辅助函数
+// 測試用異步訪問輔助函數
 impl ConfigManager {
     pub async fn get_global_config(&self) -> GlobalConfig {
         let global_read = self.global.read().await;
@@ -181,17 +179,16 @@ impl ConfigManager {
 }
 
 #[cfg(test)]
+// 測試模組
 mod tests {
     use super::*;
 
     #[tokio::test]
     async fn test_config_manager_creation() {
         let path = "test_config.json";
-        let config = ConfigManager::new(path).expect("Failed to create ConfigManager in test");
+        let config = ConfigManager::new(path).await.expect("Failed to create ConfigManager in test");
         let global = config.get_global_config().await;
         assert!(!global.restart_mode.is_empty());
-        
-        // 清理测试文件
         let _ = std::fs::remove_file(path);
     }
 }

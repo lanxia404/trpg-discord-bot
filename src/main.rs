@@ -25,13 +25,12 @@ async fn main() -> Result<(), bot::Error> {
 
     let config_manager = ConfigManager::new("config.json").await.map_err(|e| anyhow!("設定管理器初始化失敗: {}", e))?;
     let shared_config = Arc::new(Mutex::new(config_manager));
-
+    // 下面開始建立並初始化資料庫
     let skills_db = tokio_rusqlite::Connection::open("skills.db")
         .await
         .map_err(|e| anyhow!("開啟技能資料庫失敗: {}", e))?;
     skills_db
         .call(|conn| {
-            // 创建表（如果不存在）
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS skills (
                     guild_id INTEGER NOT NULL,
@@ -47,24 +46,6 @@ async fn main() -> Result<(), bot::Error> {
                 [],
             )?;
             
-            // 检查并添加 occupation 字段（如果不存在）
-            match conn.execute(
-                "ALTER TABLE skills ADD COLUMN occupation TEXT DEFAULT ''",
-                [],
-            ) {
-                Ok(_) => {}, // 字段添加成功或已存在
-                Err(_) => {}, // 字段已存在，忽略错误
-            }
-            
-            // 检查并添加 race 字段（如果不存在）
-            match conn.execute(
-                "ALTER TABLE skills ADD COLUMN race TEXT DEFAULT ''",
-                [],
-            ) {
-                Ok(_) => {}, // 字段添加成功或已存在
-                Err(_) => {}, // 字段已存在，忽略错误
-            }
-            
             Ok(())
         })
         .await
@@ -73,15 +54,15 @@ async fn main() -> Result<(), bot::Error> {
     let base_settings_db = tokio_rusqlite::Connection::open("base_settings.db")
         .await
         .map_err(|e| anyhow!("開啟基本設定資料庫失敗: {}", e))?;
+    // base_settings.db 現在用於存儲導入的數據表，無需預設表結構
+    // 導入功能將根據數據類型自動創建對應的表
     base_settings_db
         .call(|conn| {
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS base_settings (
-                key   TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            )",
-                [],
-            )?;
+            // 確保資料庫連接正常
+            conn.execute("CREATE TABLE IF NOT EXISTS __temp_check (id INTEGER)", [])
+                .map_err(|e| tokio_rusqlite::Error::Rusqlite(e))?;
+            conn.execute("DROP TABLE IF EXISTS __temp_check", [])
+                .map_err(|e| tokio_rusqlite::Error::Rusqlite(e))?;
             Ok(())
         })
         .await
@@ -95,6 +76,21 @@ async fn main() -> Result<(), bot::Error> {
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {
             commands: crate::bot::commands(),
+            on_error: |error| {
+                Box::pin(async move {
+                    log::error!("指令執行錯誤: {}", error);
+                    
+                    // 嘗試獲取具體的錯誤資訊
+                    let error_msg = format!("發生錯誤: {}", error);
+                    
+                    // 如果有互動回應，向使用者發送錯誤訊息
+                    if let poise::FrameworkError::Command { ctx, .. } = error {
+                        if let Err(why) = ctx.say(error_msg).await {
+                            log::error!("發送錯誤訊息失敗: {}", why);
+                        }
+                    }
+                })
+            },
             ..Default::default()
         })
         .setup(move |ctx, ready, framework| {

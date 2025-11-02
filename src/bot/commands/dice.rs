@@ -11,6 +11,8 @@ pub async fn roll(
     ctx: Context<'_>,
     #[description = "骰子表達式 (例如: 2d20+5, d10, 1d6>=15)"] expression: String,
 ) -> Result<(), Error> {
+    log::info!("執行 D&D 擲骰: {} for guild {:?}", expression, ctx.guild_id());
+    
     let rules = {
         let data = ctx.data();
         let config_handle = data.config.lock().await;
@@ -49,6 +51,7 @@ pub async fn roll(
             }
         }
         Err(e) => {
+            log::error!("D&D 擲骰錯誤: {} - 表達式: {}", e, expression);
             send_embed(&ctx, "D&D 擲骰錯誤", format!("錯誤: {}", e)).await?;
         }
     }
@@ -69,6 +72,8 @@ pub async fn coc(
     #[max = 10]
     times: Option<u8>,
 ) -> Result<(), Error> {
+    log::info!("執行 CoC 擲骰: 技能值={}, 次數={:?}", skill, times);
+    
     let guild_id = match ctx.guild_id() {
         Some(id) => id.get(),
         None => {

@@ -2,15 +2,15 @@ use crate::models::types::{DiceRoll, DnDRules, RollResult};
 use rand::Rng;
 use regex::Regex;
 
-/// Parse a dice expression like "2d6+1" or "d20>=15"
+/// 表達式解析（例如 "2d6+1 >= 10"）
 pub fn parse_dice_expr(expr: &str, rules: &DnDRules) -> Result<DiceRoll, String> {
     let expr = expr.trim();
     let re = Regex::new(r"^(\d*)d(\d+)([+\-]\d+)?(?:\s*(>=|<=|>|<)\s*(\d+))?$")
-        .map_err(|_| "Invalid regex pattern")?;
+        .map_err(|_| "無效的正規表達式")?;
 
     let captures = re
         .captures(expr)
-        .ok_or_else(|| "Invalid dice expression format".to_string())?;
+        .ok_or_else(|| "無效的擲骰表達式格式".to_string())?;
 
     let count_str = captures.get(1).map_or("1", |m| m.as_str());
     let count = if count_str.is_empty() {
@@ -18,31 +18,31 @@ pub fn parse_dice_expr(expr: &str, rules: &DnDRules) -> Result<DiceRoll, String>
     } else {
         count_str
             .parse::<u8>()
-            .map_err(|_| "Invalid dice count".to_string())?
+            .map_err(|_| "無效擲骰數".to_string())?
     };
 
     if count == 0 {
-        return Err("Dice count must be at least 1".to_string());
+        return Err("擲骰數必須至少為 1".to_string());
     }
 
     if count > rules.max_dice_count {
-        return Err(format!("Too many dice (max {})", rules.max_dice_count));
+        return Err(format!("擲骰數過多（最大 {}）", rules.max_dice_count));
     }
 
     let sides = captures
         .get(2)
-        .ok_or_else(|| "Missing dice sides".to_string())?
+        .ok_or_else(|| "缺少骰子面數".to_string())?
         .as_str()
         .parse::<u16>()
-        .map_err(|_| "Invalid dice sides".to_string())?;
+        .map_err(|_| "無效擲骰面數".to_string())?;
 
     if sides < 2 {
-        return Err("Dice must have at least 2 sides".to_string());
+        return Err("擲骰面數必須至少為 2".to_string());
     }
 
     if sides > rules.max_dice_sides {
         return Err(format!(
-            "Dice has too many sides (max {})",
+            "擲骰面數過多（最大 {}）",
             rules.max_dice_sides
         ));
     }
@@ -75,12 +75,12 @@ pub fn parse_dice_expr(expr: &str, rules: &DnDRules) -> Result<DiceRoll, String>
     })
 }
 
-/// Roll a single dice with given sides
+/// 指定邊數擲單骰
 pub fn roll_single_dice(sides: u16) -> u16 {
     rand::thread_rng().gen_range(1..=sides)
 }
 
-/// Roll multiple dice and return results
+/// 擲多顆骰子並返回結果
 pub fn roll_dice(dice: &DiceRoll) -> RollResult {
     let mut rolls = Vec::new();
 
@@ -90,11 +90,11 @@ pub fn roll_dice(dice: &DiceRoll) -> RollResult {
 
     let total = rolls.iter().map(|&r| r as i32).sum::<i32>() + dice.modifier;
 
-    // Check for critical success/fail
+    // 判定是否為大成功或失敗
     let is_critical_success = dice.sides == 20 && rolls.contains(&20);
     let is_critical_fail = dice.sides == 20 && rolls.contains(&1);
 
-    // Evaluate comparison if present
+    // 評估比較條件（如果存在）
     let comparison_result = match &dice.comparison {
         Some((op, value)) => match op.as_str() {
             ">=" => Some(total >= *value),
@@ -129,33 +129,33 @@ fn format_dice_expr(dice: &DiceRoll) -> String {
     format!("{}d{}{}", dice.count, dice.sides, modifier)
 }
 
-/// Parse and roll multiple dice expressions (for consecutive rolls)
+/// 解析並擲多顆骰子表達式（用於連續擲骰）
 pub fn roll_multiple_dice(
     expr: &str,
     max_rolls: u8,
     rules: &DnDRules,
 ) -> Result<Vec<RollResult>, String> {
-    let re = Regex::new(r"^(?:\+)?(\d+)\s+(.+)$").map_err(|_| "Invalid regex pattern")?;
+    let re = Regex::new(r"^(?:\+)?(\d+)\s+(.+)$").map_err(|_| "無效的正則表達式")?;
 
     if let Some(captures) = re.captures(expr.trim()) {
         let count = captures
             .get(1)
-            .ok_or_else(|| "Missing roll count".to_string())?
+            .ok_or_else(|| "缺少擲骰數量".to_string())?
             .as_str()
             .parse::<u8>()
-            .map_err(|_| "Invalid roll count".to_string())?;
+            .map_err(|_| "無效的擲骰數量".to_string())?;
 
         if count == 0 {
-            return Err("Roll count must be at least 1".to_string());
+            return Err("擲骰數量必須至少為 1".to_string());
         }
 
         if count > max_rolls {
-            return Err(format!("Too many rolls (max {})", max_rolls));
+            return Err(format!("擲骰數量過多（最大 {}）", max_rolls));
         }
 
         let expr = captures
             .get(2)
-            .ok_or_else(|| "Missing dice expression".to_string())?
+            .ok_or_else(|| "缺少擲骰表達式".to_string())?
             .as_str()
             .trim();
 

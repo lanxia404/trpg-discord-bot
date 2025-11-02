@@ -25,7 +25,7 @@ impl Default for GlobalConfig {
 pub struct GuildConfig {
     pub log_channel: Option<u64>,
     pub stream_mode: StreamMode,
-    pub stream_throttle: u64, // milliseconds
+    pub stream_throttle: u64, // 毫秒
     pub crit_success_channel: Option<u64>,
     pub crit_fail_channel: Option<u64>,
     pub dnd_rules: DnDRules,
@@ -37,7 +37,7 @@ impl Default for GuildConfig {
         Self {
             log_channel: None,
             stream_mode: StreamMode::Batch,
-            stream_throttle: 1000, // 1 second
+            stream_throttle: 1000, // 1 秒
             crit_success_channel: None,
             crit_fail_channel: None,
             dnd_rules: DnDRules::default(),
@@ -54,10 +54,10 @@ pub enum StreamMode {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DnDRules {
-    pub critical_success: u8, // usually 20
-    pub critical_fail: u8,    // usually 1
-    pub max_dice_count: u8,   // max dices in one roll
-    pub max_dice_sides: u16,  // max sides on a dice
+    pub critical_success: u8, // 通常 20
+    pub critical_fail: u8,    // 通常 1
+    pub max_dice_count: u8,   // 最大擲骰數
+    pub max_dice_sides: u16,  // 最大骰子面數
 }
 
 impl Default for DnDRules {
@@ -73,10 +73,10 @@ impl Default for DnDRules {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CoCRules {
-    pub critical_success: u8,      // usually 1
-    pub critical_fail: u8,         // usually 100
-    pub skill_divisor_hard: u8,    // usually 2 (hard success is skill/2)
-    pub skill_divisor_extreme: u8, // usually 5 (extreme success is skill/5)
+    pub critical_success: u8,      // 通常 1
+    pub critical_fail: u8,         // 通常 100
+    pub skill_divisor_hard: u8,    // 通常 2 (hard success is skill/2)
+    pub skill_divisor_extreme: u8, // 通常 5 (extreme success is skill/5)
 }
 
 impl Default for CoCRules {
