@@ -342,41 +342,45 @@ async fn schedule_shutdown(control: ProcessControl) -> Result<(), Error> {
                 sleep(Duration::from_millis(500)).await;
                 std::process::exit(0);
             });
+            Ok(()) // 返回 Ok(())
         }
         ProcessControl::Service { name } => {
             // 在服務模式下，使用系統服務管理器關閉服務
-            #[cfg(target_family = "windows")]
-            {
-                match TokioCommand::new("sc").args(["stop", &name]).status().await {
-                    Ok(_) => std::process::exit(0),
-                    Err(err) => {
-                        eprintln!("服務停止失敗: {}", err);
-                        std::process::exit(1);
-                    }
-                }
-            }
-
-            #[cfg(target_family = "unix")]
-            {
-                match TokioCommand::new("systemctl")
-                    .arg("stop")
-                    .arg(&name)
-                    .status()
-                    .await
+            // 使用 tokio::spawn 在後台執行，避免阻塞當前函數
+            tokio::spawn(async move {
+                #[cfg(target_family = "windows")]
                 {
-                    Ok(status) if status.success() => std::process::exit(0),
-                    Ok(status) => {
-                        eprintln!("systemctl stop {} 失敗，狀態碼 {:?}", name, status.code());
-                        std::process::exit(status.code().unwrap_or(1));
-                    }
-                    Err(err) => {
-                        eprintln!("systemctl stop {} 執行失敗: {}", name, err);
-                        std::process::exit(1);
+                    match TokioCommand::new("sc").args(["stop", &name]).status().await {
+                        Ok(_) => std::process::exit(0),
+                        Err(err) => {
+                            eprintln!("服務停止失敗: {}", err);
+                            std::process::exit(1);
+                        }
                     }
                 }
-            }
+
+                #[cfg(target_family = "unix")]
+                {
+                    match TokioCommand::new("systemctl")
+                        .arg("stop")
+                        .arg(&name)
+                        .status()
+                        .await
+                    {
+                        Ok(status) if status.success() => std::process::exit(0),
+                        Ok(status) => {
+                            eprintln!("systemctl stop {} 失敗，狀態碼 {:?}", name, status.code());
+                            std::process::exit(status.code().unwrap_or(1));
+                        }
+                        Err(err) => {
+                            eprintln!("systemctl stop {} 執行失敗: {}", name, err);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+            });
+            Ok(()) // 返回 Ok(())
         }
-        _ => Ok(ProcessControl::Execv),
     }
 }
 
