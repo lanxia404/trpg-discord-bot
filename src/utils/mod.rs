@@ -1,3 +1,4 @@
+pub mod api;
 pub mod coc;
 pub mod config;
 pub mod dice;

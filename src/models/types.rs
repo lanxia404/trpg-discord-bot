@@ -30,6 +30,13 @@ pub struct GuildConfig {
     pub crit_fail_channel: Option<u64>,
     pub dnd_rules: DnDRules,
     pub coc_rules: CoCRules,
+    #[serde(default)]
+    pub api_configs: std::collections::HashMap<String, crate::utils::api::ApiConfig>,
+    #[serde(default)]
+    pub active_api: Option<String>, // 指定活動的API配置名稱
+    // 為了向後兼容而保留，但不再使用
+    #[serde(default)]
+    pub api_config: Option<crate::utils::api::ApiConfig>,
 }
 
 impl Default for GuildConfig {
@@ -42,6 +49,9 @@ impl Default for GuildConfig {
             crit_fail_channel: None,
             dnd_rules: DnDRules::default(),
             coc_rules: CoCRules::default(),
+            api_configs: std::collections::HashMap::new(),
+            active_api: None,
+            api_config: None,
         }
     }
 }

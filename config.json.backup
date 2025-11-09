@@ -1,0 +1,39 @@
+{
+  "global": {
+    "developers": [
+      1381841295617687578
+    ],
+    "restart_mode": "execv",
+    "restart_service": null,
+    "global_stream_enabled": false,
+    "global_stream_channel": null
+  },
+  "guilds": {
+    "1403780455161008250": {
+      "log_channel": null,
+      "stream_mode": "Batch",
+      "stream_throttle": 1000,
+      "crit_success_channel": null,
+      "crit_fail_channel": null,
+      "dnd_rules": {
+        "critical_success": 20,
+        "critical_fail": 1,
+        "max_dice_count": 50,
+        "max_dice_sides": 1000
+      },
+      "coc_rules": {
+        "critical_success": 1,
+        "critical_fail": 100,
+        "skill_divisor_hard": 2,
+        "skill_divisor_extreme": 5
+      },
+      "api_config": {
+        "api_url": "https://free.v36.cm/v1",
+        "api_key": null,
+        "model": "gpt-4o-mini",
+        "enabled": true,
+        "provider": "OpenAI"
+      }
+    }
+  }
+}
