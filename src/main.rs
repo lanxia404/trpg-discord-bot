@@ -7,10 +7,12 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use poise::serenity_prelude as serenity;
+use regex;
 use tokio::sync::Mutex;
 
 use crate::bot::data::BotData;
 use crate::utils::config::ConfigManager;
+use crate::utils::chat_history::ChatHistoryManager;
 
 #[tokio::main]
 async fn main() -> Result<(), bot::Error> {
@@ -68,6 +70,12 @@ async fn main() -> Result<(), bot::Error> {
         .await
         .map_err(|e| anyhow!("初始化基本設定資料庫失敗: {}", e))?;
 
+    // 初始化對話歷史數據庫
+    let chat_history_manager = ChatHistoryManager::new("chat_history.db", 500).await
+        .map_err(|e| anyhow!("對話歷史管理器初始化失敗: {}", e))?;
+    let shared_chat_history_manager = Arc::new(chat_history_manager);
+    let setup_chat_history_manager = Arc::clone(&shared_chat_history_manager);
+
     let intents = serenity::GatewayIntents::GUILDS 
         | serenity::GatewayIntents::MESSAGE_CONTENT 
         | serenity::GatewayIntents::GUILD_MESSAGES;
@@ -102,17 +110,73 @@ async fn main() -> Result<(), bot::Error> {
                     
                     match event {
                         FullEvent::Message { new_message: message } => {
-                            // 檢查是否標記機器人或回覆機器人
+                            // 只檢查是否標記機器人
                             let is_mentioned = message.mentions.iter().any(|user| user.id == _ctx.cache.current_user().id);
-                            let is_reply_to_bot = message
-                                .referenced_message
-                                .as_ref()
-                                .map_or(false, |referenced| referenced.author.id == _ctx.cache.current_user().id);
 
-                            log::info!("訊息事件處理: is_mentioned={}, is_reply_to_bot={}, content='{}'", 
-                                       is_mentioned, is_reply_to_bot, message.content);
-                            
-                            if is_mentioned || is_reply_to_bot {
+                            log::info!("訊息事件處理: is_mentioned={}, content='{}'", 
+                                       is_mentioned, message.content);
+
+                            // 如果被標記，並且該頻道尚未載入初始歷史，則載入少量歷史消息
+                            if is_mentioned {
+                                let channel_id = message.channel_id.get();
+                                let mut loaded_channels = _data.initial_history_loaded.lock().await;
+                                
+                                if !loaded_channels.contains(&channel_id) {
+                                    loaded_channels.insert(channel_id);
+                                    drop(loaded_channels); // 釋放鎖定，以免在 await 時保持鎖定
+
+                                    log::info!("載入頻道 {} 的初始歷史消息", channel_id);
+                                    // 獲取當前頻道的少量歷史消息（例如最近的 20 條）
+                                    match message.channel_id.messages(&_ctx.http, serenity::GetMessages::new().limit(20)).await {
+                                        Ok(history_messages) => {
+                                            log::info!("從頻道 {} 載入了 {} 條歷史消息", channel_id, history_messages.len());
+                                            
+                                            for history_message in history_messages {
+                                                // 只記錄非機器人的消息
+                                                if history_message.author.id != _ctx.cache.current_user().id {
+                                                    if let Err(e) = _data.chat_history_manager
+                                                        .insert_message(
+                                                            channel_id,
+                                                            message.guild_id.map(|g| g.get()),
+                                                            history_message.author.id.get(),
+                                                            &history_message.author.name,
+                                                            &history_message.content,
+                                                        )
+                                                        .await
+                                                    {
+                                                        log::error!("記錄歷史消息失敗: {}", e);
+                                                    } else {
+                                                        log::debug!("記錄歷史消息: {} - {}", history_message.author.name, history_message.content);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            log::error!("獲取頻道 {} 的歷史消息失敗: {}", channel_id, e);
+                                        }
+                                    }
+                                } else {
+                                    // 釋放鎖定後再繼續
+                                    drop(loaded_channels);
+                                }
+                            }
+
+                            // 記錄所有用戶消息到對話歷史（除了機器人自己的消息）
+                            if message.author.id != _ctx.cache.current_user().id {
+                                let channel_id = message.channel_id.get();
+                                let guild_id = message.guild_id.map(|g| g.get());
+                                let user_id = message.author.id.get();
+                                let username = &message.author.name;
+                                let content = &message.content;
+
+                                if let Err(e) = _data.chat_history_manager
+                                    .insert_message(channel_id, guild_id, user_id, username, content)
+                                    .await {
+                                    log::error!("記錄對話歷史失敗: {}", e);
+                                }
+                            }
+
+                            if is_mentioned {
                                 // 處理與AI的對話
                                 log::info!("觸發AI對話處理");
                                 handle_message(_ctx, &message, _data).await;
@@ -128,14 +192,18 @@ async fn main() -> Result<(), bot::Error> {
         .setup(move |ctx, ready, framework| {
             let config = Arc::clone(&setup_config);
             let api_manager = Arc::clone(&shared_api_manager);
+            let chat_history_manager = setup_chat_history_manager;
             let skills_db = setup_skills_db.clone();
             let base_settings_db = setup_base_settings_db.clone();
             Box::pin(async move {
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
+                
                 println!("{} 已經上線!", ready.user.name);
                 Ok(BotData {
                     config,
                     api_manager,
+                    chat_history_manager,
+                    initial_history_loaded: Arc::new(Mutex::new(std::collections::HashSet::new())),
                     skills_db,
                     base_settings_db,
                 })
@@ -193,7 +261,28 @@ async fn handle_message(
         return;
     }
 
-    // 準備對話消息
+    // 獲取對話歷史
+    let channel_id = msg.channel_id.get();
+    let history_messages = data.chat_history_manager
+        .get_recent_messages(channel_id, 50) // 獲取最近50條消息作為上下文
+        .await
+        .unwrap_or_else(|e| {
+            log::error!("獲取對話歷史失敗: {}", e);
+            vec![]
+        });
+
+    // 格式化對話歷史
+    let mut context_str = String::new();
+    if !history_messages.is_empty() {
+        context_str.push_str("對話歷史:\n");
+        for history_msg in history_messages {
+            let simplified_content = simplify_message(&history_msg.content);
+            context_str.push_str(&format!("{}: {}\n", history_msg.username, simplified_content));
+        }
+        context_str.push_str("\n");
+    }
+
+    // 準備當前對話消息
     let user_msg = if let Some(referenced) = &msg.referenced_message {
         // 如果是回覆模式，將回覆的內容也加入對話
         format!("{}\n> {}", referenced.content, msg.content)
@@ -203,6 +292,9 @@ async fn handle_message(
 
     // 移除機器人標記
     let clean_msg = remove_bot_mention(&user_msg, ctx.cache.current_user().id);
+
+    // 將對話歷史與當前消息組合
+    let full_content = format!("{}當前消息: {}", context_str, clean_msg);
 
     // 優先使用配置中的 API 金鑰，如果沒有則嘗試從環境變數獲取
     let effective_api_key = api_config.api_key.clone()
@@ -229,7 +321,7 @@ async fn handle_message(
         model: api_config.model.clone(),
         messages: vec![crate::utils::api::ChatMessage {
             role: "user".to_string(),
-            content: clean_msg.clone(), // 使用clone避免移動
+            content: full_content.clone(), // 使用包含上下文的完整內容
         }],
         temperature: Some(0.7),
         max_tokens: Some(1024),
@@ -252,19 +344,25 @@ async fn handle_message(
     .await
     {
         Ok(response) => {
-            log::info!("API回應成功，長度: {}", response.len());
+            log::info!("API回應成功，字節長度: {}, 字符長度: {}", response.len(), response.chars().count());
+            
+            // 限制 AI 回應在 1000 中文字符內
+            let limited_response = limit_chinese_chars(&response, 1000);
+            
+            log::info!("限制後的回應字符長度: {}", limited_response.chars().count());
+            
             // 分割回應以防超出Discord字符限制
             const MAX_MESSAGE_LENGTH: usize = 2000;
-            let chunks: Vec<String> = response
-                .chars()
-                .collect::<Vec<_>>()
+            // 按字符進行分割
+            let chars: Vec<char> = limited_response.chars().collect();
+            let chunks: Vec<String> = chars
                 .chunks(MAX_MESSAGE_LENGTH)
                 .map(|chunk| chunk.iter().collect::<String>())
                 .collect();
 
             log::info!("回應分割為 {} 個部分", chunks.len());
             for (i, chunk) in chunks.iter().enumerate() {
-                log::info!("發送回應部分 {}: 長度 {}", i+1, chunk.len());
+                log::info!("發送回應部分 {}: 字符長度 {}", i+1, chunk.chars().count());
                 if let Err(e) = msg.channel_id.say(&ctx.http, chunk).await {
                     log::error!("發送訊息失敗: {:?}", e);
                 }
@@ -281,6 +379,50 @@ async fn handle_message(
             }
         }
     }
+}
+
+// 判斷字符是否為中文字符
+fn is_chinese_char(c: char) -> bool {
+    ('\u{4e00}'..='\u{9fff}').contains(&c) ||  // CJK統一表意文字
+    ('\u{3400}'..='\u{4dbf}').contains(&c) ||  // CJK擴展A區
+    ('\u{20000}'..='\u{2a6df}').contains(&c) || // CJK擴展B區
+    ('\u{2a700}'..='\u{2b73f}').contains(&c) || // CJK擴展C區
+    ('\u{2b740}'..='\u{2b81f}').contains(&c) || // CJK擴展D區
+    ('\u{2b820}'..='\u{2ceaf}').contains(&c) || // CJK擴展E區
+    ('\u{f900}'..='\u{faff}').contains(&c)      // CJK相容表意文字
+}
+
+// 限制字符串中的中文字符數量
+fn limit_chinese_chars(s: &str, max_count: usize) -> String {
+    let mut result = String::new();
+    let mut chinese_count = 0;
+    
+    for c in s.chars() {
+        if is_chinese_char(c) {
+            if chinese_count >= max_count {
+                break;
+            }
+            chinese_count += 1;
+        }
+        result.push(c);
+    }
+    
+    result
+}
+
+
+
+// 簡化消息內容，去除冗餘信息
+fn simplify_message(content: &str) -> String {
+    // 移除URL
+    let re_url = regex::Regex::new(r"https?://[^\s]+").unwrap_or_else(|_| regex::Regex::new(r"$^").unwrap());
+    let content = re_url.replace_all(content, "[URL]");
+    
+    // 移除過長的空白字符
+    let re_whitespace = regex::Regex::new(r"\s+").unwrap_or_else(|_| regex::Regex::new(r"$^").unwrap());
+    let content = re_whitespace.replace_all(&content, " ");
+    
+    content.to_string()
 }
 
 fn remove_bot_mention(content: &str, bot_id: serenity::UserId) -> String {
