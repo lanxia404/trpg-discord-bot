@@ -126,8 +126,8 @@ async fn main() -> Result<(), bot::Error> {
                                     drop(loaded_channels); // 釋放鎖定，以免在 await 時保持鎖定
 
                                     log::info!("載入頻道 {} 的初始歷史消息", channel_id);
-                                    // 獲取當前頻道的少量歷史消息（例如最近的 20 條）
-                                    match message.channel_id.messages(&_ctx.http, serenity::GetMessages::new().limit(20)).await {
+                                    // 獲取當前頻道的較多歷史消息（例如最近的 50 條）
+                                    match message.channel_id.messages(&_ctx.http, serenity::GetMessages::new().limit(50)).await {
                                         Ok(history_messages) => {
                                             log::info!("從頻道 {} 載入了 {} 條歷史消息", channel_id, history_messages.len());
                                             
@@ -264,7 +264,7 @@ async fn handle_message(
     // 獲取對話歷史
     let channel_id = msg.channel_id.get();
     let history_messages = data.chat_history_manager
-        .get_recent_messages(channel_id, 50) // 獲取最近50條消息作為上下文
+        .get_recent_messages(channel_id, 100) // 獲取最近100條消息作為上下文
         .await
         .unwrap_or_else(|e| {
             log::error!("獲取對話歷史失敗: {}", e);

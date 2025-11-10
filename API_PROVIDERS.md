@@ -124,3 +124,7 @@ making it compatible with many different providers.
 - When using the `/chat add` command without specifying an API key, the bot will attempt to use keys from environment variables
 - When specifying an API key via command, it's stored only in memory during the bot's runtime
 - Only users with developer permissions can access API configuration commands
+
+## 對話歷史功能
+
+Bot 在處理 AI 請求時，會從數據庫中獲取最近的 100 條消息作為上下文，以提供更連貫的對話體驗。
