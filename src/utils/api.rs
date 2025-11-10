@@ -400,7 +400,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_api_manager_creation() {
-        let _api_manager = ApiManager::new();
+        use crate::utils::config::ConfigManager;
+        let config_manager = Arc::new(tokio::sync::Mutex::new(ConfigManager::new("test_config.json").await.unwrap()));
+        let _api_manager = ApiManager::new(config_manager);
         // 測試默認配置是否正確
         let config = ApiConfig::default();
         assert_eq!(config.model, "gpt-3.5-turbo");

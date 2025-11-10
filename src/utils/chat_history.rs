@@ -140,7 +140,7 @@ impl ChatHistoryManager {
     }
     
     // 添加缺失的方法：insert_message（與add_message相同功能，但名稱與代碼匹配）
-    pub async fn insert_message(&self, channel_id: u64, guild_id: Option<u64>, user_id: u64, username: &str, content: &str) -> Result<()> {
+    pub async fn insert_message(&self, channel_id: u64, guild_id: Option<u64>, user_id: u64, _username: &str, content: &str) -> Result<()> {
         // 將 u64 值轉換為字符串
         let guild_id_str = guild_id.map(|id| id.to_string()).unwrap_or_else(|| "default_guild".to_string());
         let channel_id_str = channel_id.to_string();
@@ -152,6 +152,7 @@ impl ChatHistoryManager {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct ChatMessage {
     pub user_id: String,
     pub message: String,
