@@ -283,18 +283,22 @@ async fn handle_message(
     }
 
     // 準備當前對話消息
-    let user_msg = if let Some(referenced) = &msg.referenced_message {
-        // 如果是回覆模式，將回覆的內容也加入對話
-        format!("{}\n> {}", referenced.content, msg.content)
+    let user_msg = msg.content.clone();
+
+    // 如果當前消息是對其他消息的回覆，我們需要將被回覆的消息內容加入上下文
+    let full_content = if let Some(referenced) = &msg.referenced_message {
+        // 當前消息是對另一條消息的回覆，將被回覆的消息內容加入對話歷史
+        let replied_to_content = format!("> {} (回覆 {} 的消息): {}", referenced.author.name, referenced.author.name, referenced.content);
+        format!("{}{}\n當前消息: {}", context_str, replied_to_content, user_msg)
     } else {
-        msg.content.clone()
+        // 不是回覆，正常處理
+        format!("{}當前消息: {}", context_str, user_msg)
     };
 
     // 移除機器人標記
-    let clean_msg = remove_bot_mention(&user_msg, ctx.cache.current_user().id);
-
-    // 將對話歷史與當前消息組合
-    let full_content = format!("{}當前消息: {}", context_str, clean_msg);
+    let clean_full_content = remove_bot_mention(&full_content, ctx.cache.current_user().id);
+    
+    let full_content = clean_full_content;
 
     // 優先使用配置中的 API 金鑰，如果沒有則嘗試從環境變數獲取
     let effective_api_key = api_config.api_key.clone()
@@ -327,7 +331,7 @@ async fn handle_message(
         max_tokens: Some(1024),
     };
     
-    log::info!("API請求準備就緒: model={}, content_length={}", api_config.model, clean_msg.len());
+    log::info!("API請求準備就緒: model={}, content_length={}", api_config.model, full_content.len());
 
     // 發送 typing 指示器
     let _typing = msg.channel_id.start_typing(&ctx.http);
@@ -361,11 +365,29 @@ async fn handle_message(
                 .collect();
 
             log::info!("回應分割為 {} 個部分", chunks.len());
+            // 將機器人回應拼接起來以便記錄到歷史
+            let full_bot_response = chunks.join("");
+            
+            // 在 await 之前先獲取機器人用戶資訊
+            let channel_id = msg.channel_id.get();
+            let guild_id = msg.guild_id.map(|g| g.get());
+            let bot_user_id = ctx.cache.current_user().id.get();
+            let bot_username = ctx.cache.current_user().name.clone();
+            
             for (i, chunk) in chunks.iter().enumerate() {
                 log::info!("發送回應部分 {}: 字符長度 {}", i+1, chunk.chars().count());
                 if let Err(e) = msg.channel_id.say(&ctx.http, chunk).await {
                     log::error!("發送訊息失敗: {:?}", e);
                 }
+            }
+            
+            // 記錄機器人的回應到對話歷史
+            if let Err(e) = data.chat_history_manager
+                .insert_message(channel_id, guild_id, bot_user_id, &bot_username, &full_bot_response)
+                .await {
+                log::error!("記錄機器人對話歷史失敗: {}", e);
+            } else {
+                log::debug!("記錄機器人回應: {}", full_bot_response);
             }
         }
         Err(e) => {
