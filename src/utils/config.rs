@@ -248,6 +248,28 @@ impl ConfigManager {
         Ok(success)
     }
 
+    pub async fn get_memory_enabled_for_user(&self, user_id: &str, guild_id: &str) -> bool {
+        let guilds_read = self.guilds.read().await;
+        if let Some(guild_config) = guilds_read.get(&guild_id.parse().unwrap_or(0)) {
+            // 檢查特定用戶的記憶功能是否啟用
+            if let Some(enabled) = guild_config.memory_enabled_users.get(user_id) {
+                *enabled
+            } else {
+                // 如果用戶沒有特定設置，默認為啟用
+                true
+            }
+        } else {
+            // 如果群組配置不存在，默認為啟用
+            true
+        }
+    }
+
+    pub async fn set_memory_enabled_for_user(&self, user_id: &str, guild_id: &str, enabled: bool) {
+        let mut guilds_write = self.guilds.write().await;
+        let guild_config = guilds_write.entry(guild_id.parse().unwrap_or(0)).or_insert_with(GuildConfig::default);
+        guild_config.memory_enabled_users.insert(user_id.to_string(), enabled);
+    }
+
     pub async fn is_developer(&self, user_id: u64) -> bool {
         let global_read = self.global.read().await;
         global_read.developers.contains(&user_id)

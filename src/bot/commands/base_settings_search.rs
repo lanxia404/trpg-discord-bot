@@ -154,7 +154,7 @@ pub async fn base_settings_search(
                         } else {
                             // 使用分頁顯示
                             const ROWS_PER_PAGE: usize = 5;  // 每頁顯示5筆資料
-                            let total_pages = (filtered_data.len() + ROWS_PER_PAGE - 1) / ROWS_PER_PAGE;  // 計算總頁數
+                            let total_pages = filtered_data.len().div_ceil(ROWS_PER_PAGE);  // 計算總頁數
                             let mut current_page = 0; // 當前頁面索引
 
                             // 創建函數來生成指定頁面的embed和組件
@@ -172,7 +172,7 @@ pub async fn base_settings_search(
                                     for value in row {
                                         row_str.push_str(&format!("`{}` ", value));
                                     }
-                                    row_str.push_str("\n");
+                                    row_str.push('\n');
                                     description.push_str(&row_str);
                                 }
                                 
@@ -254,105 +254,95 @@ pub async fn base_settings_search(
                             let ctx_clone = ctx.serenity_context().clone();
                             let author_id = ctx.author().id;
 
-                            // 持續處理按鈕點擊，直到發生錯誤或明確退出
-                            loop {
-                                match message
-                                    .await_component_interaction(&ctx_clone)
-                                    .author_id(author_id)
-                                    .await
+                            // 持續處理按鈕點擊,直到發生錯誤或明確退出
+                            while let Some(interaction) = message
+                                .await_component_interaction(&ctx_clone)
+                                .author_id(author_id)
+                                .await
+                            {
+                                // 檢查是否為資料選擇按鈕
+                                if let Some(row_index_str) = interaction
+                                    .data
+                                    .custom_id
+                                    .strip_prefix("row_detail_")
                                 {
-                                    Some(interaction) => {
-                                        // 檢查是否為資料選擇按鈕
-                                        if let Some(row_index_str) = interaction
-                                            .data
-                                            .custom_id
-                                            .strip_prefix("row_detail_")
-                                        {
-                                            if let Ok(row_index) = row_index_str.parse::<usize>() {
-                                                if row_index < filtered_data.len() {
-                                                    let selected_row = &filtered_data[row_index];
+                                    if let Ok(row_index) = row_index_str.parse::<usize>() {
+                                        if row_index < filtered_data.len() {
+                                            let selected_row = &filtered_data[row_index];
                                                     
-                                                    // 創建詳細信息的embed，按固定欄位順序顯示
-                                                    let mut detail_description = String::new();
-                                                    for (i, value) in selected_row.iter().enumerate() {
-                                                        if i < column_names.len() {
-                                                            detail_description.push_str(&format!("**{}**: `{}`\n", column_names[i], value));
-                                                        } else {
-                                                            detail_description.push_str(&format!("**未知欄位**: `{}`\n", value));
-                                                        }
-                                                    }
-
-                                                    let detail_embed = serenity::CreateEmbed::default()
-                                                        .title(format!("詳細資料 - 資料列 {}", row_index + 1))
-                                                        .description(detail_description)
-                                                        .colour(serenity::Colour::GOLD);
-
-                                                    // 首先響應詳細信息作為新消息（ephemeral）
-                                                    let response = serenity::CreateInteractionResponseMessage::default()
-                                                        .embed(detail_embed)
-                                                        .ephemeral(true); // 設置為私密消息
-                                                    interaction
-                                                        .create_response(
-                                                            &ctx_clone,
-                                                            serenity::CreateInteractionResponse::Message(response),
-                                                        )
-                                                        .await?;
-                                                    
-                                                    continue; // 繼續循環
+                                            // 創建詳細信息的embed,按固定欄位順序顯示
+                                            let mut detail_description = String::new();
+                                            for (i, value) in selected_row.iter().enumerate() {
+                                                if i < column_names.len() {
+                                                    detail_description.push_str(&format!("**{}**: `{}`\n", column_names[i], value));
+                                                } else {
+                                                    detail_description.push_str(&format!("**未知欄位**: `{}`\n", value));
                                                 }
                                             }
-                                        }
-                                        
-                                        // 檢查是否為下一頁按鈕
-                                        if interaction.data.custom_id.starts_with("row_next_") {
-                                            if current_page < total_pages - 1 {
-                                                current_page += 1;
-                                            }
-                                            
-                                            let (new_embed, new_components) = create_page(current_page);
-                                            let update_msg = serenity::CreateInteractionResponseMessage::default()
-                                                .embed(new_embed)
-                                                .components(new_components);
+
+                                            let detail_embed = serenity::CreateEmbed::default()
+                                                .title(format!("詳細資料 - 資料列 {}", row_index + 1))
+                                                .description(detail_description)
+                                                .colour(serenity::Colour::GOLD);
+
+                                            // 首先響應詳細信息作為新消息(ephemeral)
+                                            let response = serenity::CreateInteractionResponseMessage::default()
+                                                .embed(detail_embed)
+                                                .ephemeral(true); // 設置為私密消息
                                             interaction
                                                 .create_response(
                                                     &ctx_clone,
-                                                    serenity::CreateInteractionResponse::UpdateMessage(update_msg),
+                                                    serenity::CreateInteractionResponse::Message(response),
                                                 )
                                                 .await?;
-                                            
-                                            message = *interaction.message.clone();
+                                                    
                                             continue; // 繼續循環
                                         }
-                                        
-                                        // 檢查是否為上一頁按鈕
-                                        if interaction.data.custom_id.starts_with("row_prev_") {
-                                            if current_page > 0 {
-                                                current_page -= 1;
-                                            }
-                                            
-                                            let (new_embed, new_components) = create_page(current_page);
-                                            let update_msg = serenity::CreateInteractionResponseMessage::default()
-                                                .embed(new_embed)
-                                                .components(new_components);
-                                            interaction
-                                                .create_response(
-                                                    &ctx_clone,
-                                                    serenity::CreateInteractionResponse::UpdateMessage(update_msg),
-                                                )
-                                                .await?;
-                                            
-                                            message = *interaction.message.clone();
-                                            continue; // 繼續循環
-                                        }
-                                        
-                                        // 重置消息以繼續接收交互
-                                        message = message.clone();
-                                    }
-                                    None => {
-                                        // 如果沒有交互，跳出循環
-                                        break;
                                     }
                                 }
+                                        
+                                // 檢查是否為下一頁按鈕
+                                if interaction.data.custom_id.starts_with("row_next_") {
+                                    if current_page < total_pages - 1 {
+                                        current_page += 1;
+                                    }
+                                            
+                                    let (new_embed, new_components) = create_page(current_page);
+                                    let update_msg = serenity::CreateInteractionResponseMessage::default()
+                                        .embed(new_embed)
+                                        .components(new_components);
+                                    interaction
+                                        .create_response(
+                                            &ctx_clone,
+                                            serenity::CreateInteractionResponse::UpdateMessage(update_msg),
+                                        )
+                                        .await?;
+                                            
+                                    message = *interaction.message.clone();
+                                    continue; // 繼續循環
+                                }
+                                        
+                                // 檢查是否為上一頁按鈕
+                                if interaction.data.custom_id.starts_with("row_prev_") {
+                                    current_page = current_page.saturating_sub(1);
+                                            
+                                    let (new_embed, new_components) = create_page(current_page);
+                                    let update_msg = serenity::CreateInteractionResponseMessage::default()
+                                        .embed(new_embed)
+                                        .components(new_components);
+                                    interaction
+                                        .create_response(
+                                            &ctx_clone,
+                                            serenity::CreateInteractionResponse::UpdateMessage(update_msg),
+                                        )
+                                        .await?;
+                                            
+                                    message = *interaction.message.clone();
+                                    continue; // 繼續循環
+                                }
+                                        
+                                // 重置消息以繼續接收交互
+                                message = message.clone();
                             }
                         }
                     } else {

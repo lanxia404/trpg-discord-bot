@@ -7,4 +7,6 @@ pub mod effect;
 pub mod help;
 pub mod import;
 pub mod logs;
+pub mod memory;
 pub mod skills;
+pub mod summarize;
