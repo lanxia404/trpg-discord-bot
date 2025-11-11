@@ -30,7 +30,29 @@ pub struct GuildConfig {
     pub crit_fail_channel: Option<u64>,
     pub dnd_rules: DnDRules,
     pub coc_rules: CoCRules,
+    #[serde(default)]
+    pub api_configs: std::collections::HashMap<String, crate::utils::api::ApiConfig>,
+    #[serde(default)]
+    pub active_api: Option<String>, // 指定活動的API配置名稱
+    // 為了向後兼容而保留，但不再使用
+    #[serde(default)]
+    pub api_config: Option<crate::utils::api::ApiConfig>,
+    #[serde(default)]
+    pub memory_enabled_users: std::collections::HashMap<String, bool>, // 記憶功能開關：使用者ID -> 是否啟用
+    #[serde(default)]
+    pub memory_vector_storage_method: VectorStorageMethod, // 向量儲存計算方式
 }
+
+// 記憶向量儲存方式
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
+pub enum VectorStorageMethod {
+    #[default]
+    Local,          // 本地計算和儲存
+    EmbeddingApi,   // 使用嵌入API
+    VectorDatabase, // 使用向量資料庫
+}
+
 
 impl Default for GuildConfig {
     fn default() -> Self {
@@ -42,6 +64,11 @@ impl Default for GuildConfig {
             crit_fail_channel: None,
             dnd_rules: DnDRules::default(),
             coc_rules: CoCRules::default(),
+            api_configs: std::collections::HashMap::new(),
+            active_api: None,
+            api_config: None,
+            memory_enabled_users: std::collections::HashMap::new(),
+            memory_vector_storage_method: VectorStorageMethod::Local,
         }
     }
 }

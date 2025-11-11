@@ -94,7 +94,32 @@ impl ConfigManager {
     pub async fn load_config(&mut self) -> Result<(), ConfigError> {
         if Path::new(&self.config_path).exists() {
             let content = fs::read_to_string(&self.config_path)?;
-            let config_data: ConfigData = serde_json::from_str(&content)?;
+            let mut config_data: ConfigData = serde_json::from_str(&content)?;
+
+            // 檢查並轉換舊格式的API配置為新格式
+            if let Some(ref mut guilds) = config_data.guilds {
+                for (_, guild_config) in guilds.iter_mut() {
+                    // 如果存在舊格式的api_config，則轉換為新格式
+                    if guild_config.api_config.is_some() {
+                        let old_api_config = guild_config.api_config.take().unwrap();
+                        // 為舊配置設定一個預設名稱
+                        let name = if old_api_config.api_url.is_empty() {
+                            "default".to_string()
+                        } else {
+                            old_api_config.api_url.clone()
+                        };
+                        
+                        // 設定名稱
+                        let mut new_api_config = old_api_config;
+                        new_api_config.name = name.clone();
+                        
+                        // 初始化api_configs映射並添加配置
+                        guild_config.api_configs.insert(name.clone(), new_api_config);
+                        // 將此配置設為活動配置
+                        guild_config.active_api = Some(name);
+                    }
+                }
+            }
 
             *self.global.write().await = config_data.global.unwrap_or_default();
             *self.guilds.write().await = config_data.guilds.unwrap_or_default();
@@ -132,6 +157,117 @@ impl ConfigManager {
         let mut guilds_write = self.guilds.write().await;
         guilds_write.insert(guild_id, config);
         self.save_config().await
+    }
+
+    pub async fn get_guild_api_config(&self, guild_id: u64) -> crate::utils::api::ApiConfig {
+        let guilds_read = self.guilds.read().await;
+        if let Some(guild_config) = guilds_read.get(&guild_id) {
+            if let Some(ref active_api_name) = guild_config.active_api {
+                // 嘗試獲取活動的API配置
+                if let Some(api_config) = guild_config.api_configs.get(active_api_name) {
+                    api_config.clone()
+                } else {
+                    // 如果活動的API配置不存在，返回默認配置
+                    crate::utils::api::ApiConfig::default()
+                }
+            } else {
+                // 如果沒有設置活動API，返回默認配置
+                crate::utils::api::ApiConfig::default()
+            }
+        } else {
+            crate::utils::api::ApiConfig::default()
+        }
+    }
+
+    pub async fn add_guild_api_config(
+        &self,
+        guild_id: u64,
+        api_config: crate::utils::api::ApiConfig,
+    ) -> Result<(), ConfigError> {
+        let mut guilds_write = self.guilds.write().await;
+        let guild_config = guilds_write.entry(guild_id).or_insert_with(GuildConfig::default);
+        let config_name = api_config.name.clone();
+        guild_config.api_configs.insert(config_name.clone(), api_config);
+        // 如果這是第一個配置，設為活動配置
+        if guild_config.active_api.is_none() {
+            guild_config.active_api = Some(config_name);
+        }
+        drop(guilds_write);
+        self.save_config().await
+    }
+
+    pub async fn get_guild_api_configs(&self, guild_id: u64) -> std::collections::HashMap<String, crate::utils::api::ApiConfig> {
+        let guilds_read = self.guilds.read().await;
+        if let Some(guild_config) = guilds_read.get(&guild_id) {
+            guild_config.api_configs.clone()
+        } else {
+            std::collections::HashMap::new()
+        }
+    }
+
+    pub async fn remove_guild_api_config(&self, guild_id: u64, name: &str) -> Result<bool, ConfigError> {
+        let mut guilds_write = self.guilds.write().await;
+        let mut removed = false;
+        if let Some(guild_config) = guilds_write.get_mut(&guild_id) {
+            if guild_config.api_configs.remove(name).is_some() {
+                removed = true;
+                // 如果刪除的是活動API配置，則將活動API設為空或選擇其他配置
+                if let Some(ref active_name) = guild_config.active_api {
+                    if active_name == name {
+                        if guild_config.api_configs.is_empty() {
+                            guild_config.active_api = None;
+                        } else {
+                            // 選擇第一個可用的API配置作為活動配置
+                            if let Some(first_key) = guild_config.api_configs.keys().next() {
+                                guild_config.active_api = Some(first_key.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        drop(guilds_write);
+        self.save_config().await?;
+        Ok(removed)
+    }
+
+    pub async fn set_active_api(&self, guild_id: u64, name: &str) -> Result<bool, ConfigError> {
+        let mut guilds_write = self.guilds.write().await;
+        let mut success = false;
+        if let Some(guild_config) = guilds_write.get_mut(&guild_id) {
+            // 檢查是否有名為name的配置
+            if guild_config.api_configs.contains_key(name) {
+                guild_config.active_api = Some(name.to_string());
+                success = true;
+            }
+        }
+        drop(guilds_write);
+        if success {
+            self.save_config().await?;
+        }
+        Ok(success)
+    }
+
+    pub async fn get_memory_enabled_for_user(&self, user_id: &str, guild_id: &str) -> bool {
+        let guilds_read = self.guilds.read().await;
+        if let Some(guild_config) = guilds_read.get(&guild_id.parse().unwrap_or(0)) {
+            // 檢查特定用戶的記憶功能是否啟用
+            if let Some(enabled) = guild_config.memory_enabled_users.get(user_id) {
+                *enabled
+            } else {
+                // 如果用戶沒有特定設置，默認為啟用
+                true
+            }
+        } else {
+            // 如果群組配置不存在，默認為啟用
+            true
+        }
+    }
+
+    pub async fn set_memory_enabled_for_user(&self, user_id: &str, guild_id: &str, enabled: bool) {
+        let mut guilds_write = self.guilds.write().await;
+        let guild_config = guilds_write.entry(guild_id.parse().unwrap_or(0)).or_insert_with(GuildConfig::default);
+        guild_config.memory_enabled_users.insert(user_id.to_string(), enabled);
     }
 
     pub async fn is_developer(&self, user_id: u64) -> bool {

@@ -28,7 +28,7 @@ fn detect_file_type(filename: &str, content_type: &str) -> FileType {
 }
 
 /// 從雲端獲取文件並導入至機器人資料庫
-#[poise::command(slash_command, guild_only, required_permissions = "ADMINISTRATOR")]
+#[poise::command(slash_command)]
 pub async fn import_data(
     ctx: Context<'_>,
     #[description = "文件的 URL 或共享連結"] url: String,
@@ -36,6 +36,29 @@ pub async fn import_data(
     #[description = "手動指定檔案類型 (csv, xlsx, xls, ods, json, tsv)，留空則自動檢測"] file_type: Option<String>,
     #[description = "對於多工作表文件，指定要導入的工作表名稱，留空則導入所有工作表"] sheet_name: Option<String>,
 ) -> Result<(), Error> {
+    // 檢查執行者是否為管理員或開發者
+    let has_permission = {
+        let author_id = ctx.author().id.get();
+        
+        // 取得伺服器中的成員資訊和權限
+        let is_admin = if let Some(guild_id) = ctx.guild_id() {
+            let member = guild_id.member(&ctx.serenity_context().http, ctx.author().id).await
+                .map_err(|_| Error::msg("無法取得成員資訊"))?;
+            member.permissions(&ctx.serenity_context().cache).map(|perms| perms.administrator()).unwrap_or(false)
+        } else {
+            false // 在私人頻道中，用戶不可能是管理員
+        };
+        
+        let config_manager = ctx.data().config.lock().await;
+        let is_developer = futures::executor::block_on(config_manager.is_developer(author_id));
+        is_admin || is_developer
+    };
+
+    if !has_permission {
+        ctx.say("您沒有權限執行此指令。僅限伺服器管理員或已註冊開發者使用。").await?;
+        return Ok(());
+    }
+
     log::info!("開始導入數據: {} 到表 {}，工作表: {:?}，檔案類型: {:?}", url, table_name, sheet_name, file_type);
     
     ctx.say("開始導入數據...").await?;

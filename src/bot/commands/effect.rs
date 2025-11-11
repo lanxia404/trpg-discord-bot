@@ -1,6 +1,7 @@
-use create::bot::{Context, Error};
+use crate::bot::{Context, Error};
 use poise::CreateReply;
 use poise::serenity_prelude as serenity;
+use tokio_rusqlite::params;
 
 #[derive(Debug, Clone)]
 struct EffectRecord {
@@ -33,7 +34,7 @@ pub async fn effect(
     let limit = limit.unwrap_or(5) as usize;
 
     // TODO: 將查詢改為真正的 base-settings.db 連線
-    let matches = fetch_effects_from_base(keyword, limit).await?;
+    let matches = fetch_effects_from_base(ctx, keyword, limit).await?;
 
     if matches.is_empty() {
         let embed = serenity::CreateEmbed::default()
@@ -58,12 +59,13 @@ pub async fn effect(
         let mut value = description;
         if let Some(note) = note {
             value.push_str(&format!("\n**備註**: {}", note));
-            value.push_str(&extrya);
         }
         embed = embed.field(
-            category 
-                .map(|cat| format!("{} ({})", name, cat))
-                .unwrap_or(name),
+            if category.is_empty() {
+                name
+            } else {
+                format!("{} ({})", name, category)
+            },
             value,
             false,
         );
@@ -73,75 +75,49 @@ pub async fn effect(
     Ok(())
 }
 
+
 async fn fetch_effects_from_base(
+    ctx: Context<'_>,
     keyword: &str,
     limit: usize,
 ) -> Result<Vec<EffectRecord>, Error> {
     let keyword_lower = keyword.to_lowercase();
+    let base_settings_db = ctx.data().base_settings_db.clone();
+    let keyword_pattern = format!("%{}%", keyword_lower);
 
-    // TODO: 之後以base-settings.db查詢取代
-    let candidates = mock_effects_catalog();
+    let results = base_settings_db
+        .call(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT category, name, description FROM 異常狀態 \
+                WHERE LOWER(name) LIKE ?1 OR LOWER(category) LIKE ?1 OR LOWER(description) LIKE ?1 \
+                ORDER BY CASE \
+                    WHEN LOWER(name) LIKE ?1 THEN 1 \
+                    WHEN LOWER(category) LIKE ?1 THEN 2 \
+                    WHEN LOWER(description) LIKE ?1 THEN 3 \
+                    ELSE 4 \
+                END, \
+                ABS(LENGTH(name) - LENGTH(?2)) ASC, name \
+                LIMIT ?3"
+            )?;
 
-    let mut results: Vec<_> = candidates
-        .into_iter()
-        .filter(|effect| fuzzy_match(effect, keyword))
-        .collect();
-    
-    results.sort_by_key(|effect| effect.name.len());
-	results.truncate(limit);
+            let rows = stmt.query_map(params![keyword_pattern, keyword_lower, limit], |row| {
+                Ok(EffectRecord {
+                    category: row.get(0)?,
+                    name: row.get(1)?,
+                    description: row.get(2)?,
+                    note: None, // 異常狀態表沒有note欄位，所以設為None
+                })
+            })?;
 
-	Ok(results)
-}
+            let mut effects = Vec::new();
+            for effect in rows.flatten() {
+                effects.push(effect);
+            }
 
-fn fuzzy_match(effect: &EffectRecord, keyword: &str) -> bool {
-	let name = effect.name.to_lowercase();
-	if name.contains(keyword) {
-		return true;
-	}
-	effect 
-		.notes
-		.as_ref()
-		.map(|note| note.to_lowercase().contains(keyword))
-		.unwrap_or(false)
-}
+            Ok(effects)
+        })
+        .await
+        .map_err(|e| Error::msg(format!("資料庫查詢錯誤: {}", e)))?;
 
-fn mock_effects_catalog() -> Vec<EffectRecord> {
-	vec![
-		EffectRecord {
-			name: "中毒".to_string(),
-			category: "狀態異常".to_string(),
-			description: "每回合結束時損失一定比例的最大生命值。".to_string(),
-			note: Some("無法在戰鬥中治療。".to_string()),
-		},
-		EffectRecord {
-			name: "燃燒".to_string(),
-			category: "狀態異常".to_string(),
-			description: "每回合結束時損失固定數量的生命值。".to_string(),
-			note: None,
-		},
-		EffectRecord {
-			name: "冰凍".to_string(),
-			category: "狀態異常".to_string(),
-			description: "無法行動，直到冰凍效果解除。".to_string(),
-			note: Some("受到火焰攻擊會解除冰凍。".to_string()),
-		},
-		EffectRecord {
-			name: "麻痺".to_string(),
-			category: "狀態異常".to_string(),
-			description: "有機率無法行動。".to_string(),
-			note: None,
-		},
-		EffectRecord {
-			name: "睡眠".to_string(),
-			category: "狀態異常".to_string(),
-			description: "無法行動，直到被攻擊或效果解除。".to_string(),
-			note: Some("受到物理攻擊會解除睡眠。".to_string()),
-		},
-		EffectRecord {
-			name: "魅惑".to_string(),
-			category: "狀態異常".to_string(),
-			description: "有機率攻擊隊友。".to_string(),
-			note: None,
-		},
-	]
+    Ok(results)
 }

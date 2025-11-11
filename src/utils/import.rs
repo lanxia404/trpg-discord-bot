@@ -188,7 +188,7 @@ impl ImportService {
                 format!("解析 CSV 標題行失敗: {}\n診斷資訊:\n  1. 請確認 CSV 檔案包含有效的標題行\n  2. 檢查檔案編碼是否為 UTF-8\n  3. 確認檔案內容不為空\n  4. 檢查是否有特殊字符導致解析錯誤\n詳細錯誤: {}", e, e)
             })?.clone();
         
-        if headers.len() == 0 {
+        if headers.is_empty() {
             return Err("CSV 檔案沒有標題行\n診斷資訊:\n  1. 請確認 CSV 檔案包含標題行\n  2. 檢查檔案是否為空\n  3. 確認檔案結構正確".into());
         }
         
@@ -613,12 +613,12 @@ impl ImportService {
                 
                 for header in &headers {
                     let value = obj.get(header)
-                        .and_then(|v| match v {
-                            serde_json::Value::String(s) => Some(s.clone()),
-                            serde_json::Value::Number(n) => Some(n.to_string()),
-                            serde_json::Value::Bool(b) => Some(b.to_string()),
-                            serde_json::Value::Null => Some("".to_string()),
-                            _ => Some(v.to_string()), // For arrays/objects, convert to string representation
+                        .map(|v| match v {
+                            serde_json::Value::String(s) => s.clone(),
+                            serde_json::Value::Number(n) => n.to_string(),
+                            serde_json::Value::Bool(b) => b.to_string(),
+                            serde_json::Value::Null => "".to_string(),
+                            _ => v.to_string(), // For arrays/objects, convert to string representation
                         })
                         .unwrap_or_else(|| "".to_string());
                     values.push(value);
@@ -1022,7 +1022,7 @@ impl ImportService {
     fn sanitize_column_name(name: &str) -> String {
         let re = Regex::new(r"[^a-zA-Z0-9_]").unwrap();
         let sanitized = re.replace_all(name, "_");
-        if sanitized.is_empty() || sanitized.chars().next().map_or(true, |c| c.is_ascii_digit()) {
+        if sanitized.is_empty() || sanitized.chars().next().is_none_or(|c| c.is_ascii_digit()) {
             format!("_{}", sanitized)
         } else {
             sanitized.to_string()
@@ -1035,7 +1035,7 @@ impl ImportService {
         let sanitized = re.replace_all(name, "_");
         
         // 確保不以數字開頭
-        if sanitized.chars().next().map_or(true, |c| c.is_ascii_digit()) {
+        if sanitized.chars().next().is_none_or(|c| c.is_ascii_digit()) {
             format!("_{}", sanitized)
         } else {
             sanitized.to_string()
