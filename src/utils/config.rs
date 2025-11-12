@@ -154,8 +154,10 @@ impl ConfigManager {
         guild_id: u64,
         config: GuildConfig,
     ) -> Result<(), ConfigError> {
-        let mut guilds_write = self.guilds.write().await;
-        guilds_write.insert(guild_id, config);
+        {
+            let mut guilds_write = self.guilds.write().await;
+            guilds_write.insert(guild_id, config);
+        } // 釋放寫鎖
         self.save_config().await
     }
 

@@ -30,6 +30,7 @@ pub struct SearchOptions {
     pub max_results: usize,
     pub guild_id: Option<String>,
     pub user_id: Option<String>,
+    pub channel_id: Option<String>,
     pub tags: Option<String>,
 }
 
@@ -80,8 +81,8 @@ impl MemoryManager {
                     importance_score REAL DEFAULT 0.0,
                     tags TEXT,
                     enabled BOOLEAN DEFAULT 1,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    last_accessed DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    created_at TEXT NOT NULL,
+                    last_accessed TEXT NOT NULL,
                     embedding_vector BLOB  -- 用於存儲序列化的向量
                 )",
                 [],
@@ -111,6 +112,8 @@ impl MemoryManager {
         let importance_score = memory_entry.importance_score;
         let tags = memory_entry.tags.clone();
         let enabled = memory_entry.enabled;
+        let created_at = memory_entry.created_at.clone();
+        let last_accessed = memory_entry.last_accessed.clone();
         let embedding_vector = memory_entry.embedding_vector.clone();
 
         // 序列化嵌入向量
@@ -118,7 +121,7 @@ impl MemoryManager {
 
         let id = self.db_conn.call(move |conn| {
             let mut stmt = conn.prepare(
-                "INSERT INTO memory_embeddings (user_id, guild_id, channel_id, content, content_type, importance_score, tags, enabled, embedding_vector) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
+                "INSERT INTO memory_embeddings (user_id, guild_id, channel_id, content, content_type, importance_score, tags, enabled, created_at, last_accessed, embedding_vector) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"
             )?;
             stmt.execute((
                 &user_id,
@@ -129,6 +132,8 @@ impl MemoryManager {
                 &importance_score,
                 &tags,
                 &(enabled as i32),
+                &created_at,
+                &last_accessed,
                 &embedding_bytes,
             ))?;
             Ok(conn.last_insert_rowid() as i32)
@@ -143,6 +148,7 @@ impl MemoryManager {
         
         let guild_id = options.guild_id.clone().unwrap_or_default();
         let user_id = options.user_id.clone().unwrap_or_default();
+        let channel_id = options.channel_id.clone().unwrap_or_default();
         let tags = options.tags.clone().unwrap_or_default();
         let max_results = max_results_to_i32(options.max_results);
 
@@ -159,6 +165,11 @@ impl MemoryManager {
             if !user_id.is_empty() {
                 sql.push_str(" AND user_id = ?");
                 params.push(user_id);
+            }
+
+            if !channel_id.is_empty() {
+                sql.push_str(" AND channel_id = ?");
+                params.push(channel_id);
             }
 
             if !tags.is_empty() {
@@ -206,10 +217,17 @@ impl MemoryManager {
                     })?;
                     Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
                 },
-                _ => {
-                    // 如果超出預期參數數量，只處理前4個
+                5 => {
                     let mut stmt = conn.prepare(&sql)?;
-                    let valid_params = &params[..std::cmp::min(4, params.len())];
+                    let rows = stmt.query_map([params[0].as_str(), params[1].as_str(), params[2].as_str(), params[3].as_str(), params[4].as_str()], |row| {
+                        process_row_result(row)
+                    })?;
+                    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+                },
+                _ => {
+                    // 如果超出預期參數數量，只處理前5個
+                    let mut stmt = conn.prepare(&sql)?;
+                    let valid_params = &params[..std::cmp::min(5, params.len())];
                     match valid_params.len() {
                         1 => {
                             let rows = stmt.query_map([valid_params[0].as_str()], |row| {
@@ -231,6 +249,12 @@ impl MemoryManager {
                         },
                         4 => {
                             let rows = stmt.query_map([valid_params[0].as_str(), valid_params[1].as_str(), valid_params[2].as_str(), valid_params[3].as_str()], |row| {
+                                process_row_result(row)
+                            })?;
+                            Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+                        },
+                        5 => {
+                            let rows = stmt.query_map([valid_params[0].as_str(), valid_params[1].as_str(), valid_params[2].as_str(), valid_params[3].as_str(), valid_params[4].as_str()], |row| {
                                 process_row_result(row)
                             })?;
                             Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
@@ -360,7 +384,7 @@ impl MemoryManager {
             embedding_vector: None, // 將在 save_memory 中生成
         };
 
-        let _ = self.save_memory(memory_entry).await; // 忽略存儲錯誤以避免影響主要功能
+        self.save_memory(memory_entry).await?;
 
         Ok(())
     }
@@ -397,12 +421,10 @@ impl MemoryManager {
     }
 
     // 添加缺失的方法：get_recent_messages（與get_history相同功能，但名稱與代碼匹配）
-    pub async fn get_recent_messages(&self, channel_id: u64, limit: usize) -> Result<Vec<ChatMessage>> {
-        // 我們假設這個方法是獲取頻道的最近消息
-        // 在實際實現中，你可能需要根據具體的guild_id來獲取
-        // 這裡我們使用一個默認值，但在實際實現中你可能需要調整
+    pub async fn get_recent_messages(&self, guild_id: u64, channel_id: u64, limit: usize) -> Result<Vec<ChatMessage>> {
+        let guild_id_str = guild_id.to_string();
         let channel_id_str = channel_id.to_string();
-        self.get_history("default_guild", &channel_id_str, Some(limit)).await
+        self.get_history(&guild_id_str, &channel_id_str, Some(limit)).await
     }
 
     // 添加缺失的方法：insert_message（與add_message相同功能，但名稱與代碼匹配）
@@ -736,8 +758,8 @@ fn process_row_result(row: &rusqlite::Row) -> std::result::Result<MemoryEntry, r
     let tags = row.get(7)?;
     let enabled_i32: i32 = row.get(8)?;
     let enabled = enabled_i32 != 0;
-    let created_at = row.get(9)?;
-    let last_accessed = row.get(10)?;
+    let created_at: String = row.get(9)?;
+    let last_accessed: String = row.get(10)?;
     
     // 檢查並獲得嵌入向量
     let embedding_bytes: Vec<u8> = row.get(11)?;

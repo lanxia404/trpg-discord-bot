@@ -98,6 +98,7 @@ impl ConversationManager {
         let retrieved_memories = self
             .retrieve_relevant_memories(
                 guild_id,
+                channel_id,
                 user_id,
                 user_message,
                 (available_tokens - used_tokens) / 4, // 分配 25% 給記憶
@@ -110,7 +111,7 @@ impl ConversationManager {
         // 5. 獲取對話歷史
         let remaining_tokens = available_tokens.saturating_sub(used_tokens);
         let conversation_history = self
-            .get_conversation_history(channel_id, remaining_tokens, strategy)
+            .get_conversation_history(guild_id, channel_id, remaining_tokens, strategy)
             .await?;
 
         // 6. 構建最終上下文
@@ -259,6 +260,7 @@ impl ConversationManager {
     async fn retrieve_relevant_memories(
         &self,
         guild_id: u64,
+        channel_id: u64,
         user_id: u64,
         query: &str,
         max_tokens: usize,
@@ -273,6 +275,7 @@ impl ConversationManager {
             max_results,
             guild_id: Some(guild_id.to_string()),
             user_id: Some(user_id.to_string()),
+            channel_id: Some(channel_id.to_string()),
             tags: None,
         };
 
@@ -304,6 +307,7 @@ impl ConversationManager {
     /// 獲取對話歷史
     async fn get_conversation_history(
         &self,
+        guild_id: u64,
         channel_id: u64,
         max_tokens: usize,
         strategy: ContextStrategy,
@@ -311,7 +315,7 @@ impl ConversationManager {
         // 獲取最近的對話記錄
         let history = self
             .memory_manager
-            .get_recent_messages(channel_id, 100)
+            .get_recent_messages(guild_id, channel_id, 100)
             .await?;
 
         let mut messages = Vec::new();
@@ -389,7 +393,7 @@ impl ConversationManager {
     ) -> Result<String> {
         let history = self
             .memory_manager
-            .get_recent_messages(channel_id, message_count)
+            .get_recent_messages(guild_id, channel_id, message_count)
             .await?;
 
         if history.is_empty() {

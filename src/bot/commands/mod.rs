@@ -1,5 +1,4 @@
 pub mod admin;
-pub mod admin_api_clear;
 pub mod base_settings_search;
 pub mod chat;
 pub mod dice;

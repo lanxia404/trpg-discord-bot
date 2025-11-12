@@ -8,8 +8,7 @@ pub fn commands() -> Vec<poise::Command<data::BotData, Error>> {
     vec![
         commands::base_settings_search::base_settings_search(), // 使用了 name = "bs-search" 屬性
         commands::chat::chat(),
-        commands::dice::roll(),
-        commands::dice::coc(),
+        commands::dice::dice(),
         commands::effect::effect(),
         commands::logs::crit(),
         commands::skills::skill(),

@@ -139,11 +139,13 @@ async fn main() -> Result<(), bot::Error> {
                             .iter()
                             .any(|user| user.id == _ctx.cache.current_user().id);
 
-                        log::info!(
-                            "訊息事件處理: is_mentioned={}, content='{}'",
-                            is_mentioned,
-                            message.content
-                        );
+                        // 只在被提及時記錄日誌
+                        if is_mentioned {
+                            log::info!(
+                                "訊息事件處理: is_mentioned=true, content='{}'",
+                                message.content
+                            );
+                        }
 
                         // 如果被標記，並且該頻道尚未載入初始歷史，則載入少量歷史消息
                         if is_mentioned {
@@ -296,9 +298,13 @@ async fn handle_message(ctx: &serenity::Context, msg: &serenity::Message, data: 
     }
 
     let guild_id = msg.guild_id.unwrap().get();
+    let channel_id = msg.channel_id.get();
+    let user_id = msg.author.id.get();
+
     log::info!(
-        "收到訊息，Guild ID: {}, Author: {}",
+        "收到訊息，Guild ID: {}, Channel ID: {}, Author: {}",
         guild_id,
+        channel_id,
         msg.author.name
     );
 
@@ -327,54 +333,60 @@ async fn handle_message(ctx: &serenity::Context, msg: &serenity::Message, data: 
         return;
     }
 
-    // 獲取對話歷史
-    let channel_id = msg.channel_id.get();
-    let history_messages = data
-        .memory_manager
-        .get_recent_messages(channel_id, 100) // 獲取最近100條消息作為上下文
-        .await
-        .unwrap_or_else(|e| {
-            log::error!("獲取對話歷史失敗: {}", e);
-            vec![]
-        });
+    // 準備用戶消息內容
+    let mut user_message = remove_bot_mention(&msg.content, ctx.cache.current_user().id);
 
-    // 格式化對話歷史
-    let mut context_str = String::new();
-    if !history_messages.is_empty() {
-        context_str.push_str("對話歷史:\n");
-        for history_msg in history_messages {
-            let simplified_content = simplify_message(&history_msg.content);
-            context_str.push_str(&format!(
-                "{}: {}\n",
-                history_msg.username, simplified_content
-            ));
-        }
-        context_str.push('\n');
+    // 如果當前消息是對其他消息的回覆，將被回覆的消息內容加入上下文
+    if let Some(referenced) = &msg.referenced_message {
+        let replied_context = format!(
+            "[回覆 {}: {}]\n{}",
+            referenced.author.name, referenced.content, user_message
+        );
+        user_message = replied_context;
     }
 
-    // 準備當前對話消息
-    let user_msg = msg.content.clone();
-
-    // 如果當前消息是對其他消息的回覆，我們需要將被回覆的消息內容加入上下文
-    let full_content = if let Some(referenced) = &msg.referenced_message {
-        // 當前消息是對另一條消息的回覆，將被回覆的消息內容加入對話歷史
-        let replied_to_content = format!(
-            "> {} (回覆 {} 的消息): {}",
-            referenced.author.name, referenced.author.name, referenced.content
-        );
-        format!(
-            "{}{}\n當前消息: {}",
-            context_str, replied_to_content, user_msg
+    // 使用 ConversationManager 構建對話上下文
+    let conversation_context = match data
+        .conversation_manager
+        .build_context(
+            guild_id,
+            channel_id,
+            user_id,
+            &user_message,
+            crate::utils::conversation::ContextStrategy::Hybrid,
         )
-    } else {
-        // 不是回覆，正常處理
-        format!("{}當前消息: {}", context_str, user_msg)
+        .await
+    {
+        Ok(ctx) => ctx,
+        Err(e) => {
+            log::error!("構建對話上下文失敗: {}", e);
+            if let Err(e) = msg
+                .channel_id
+                .say(&ctx.http, format!("處理對話時發生錯誤: {}", e))
+                .await
+            {
+                log::error!("發送錯誤訊息失敗: {:?}", e);
+            }
+            return;
+        }
     };
 
-    // 移除機器人標記
-    let clean_full_content = remove_bot_mention(&full_content, ctx.cache.current_user().id);
+    log::info!(
+        "對話上下文已構建: messages={}, tokens={}, memories={}",
+        conversation_context.messages.len(),
+        conversation_context.total_tokens,
+        conversation_context.retrieved_memories.len()
+    );
 
-    let full_content = clean_full_content;
+    // 將 ConversationContext 轉換為 API 請求格式
+    let api_messages: Vec<crate::utils::api::ChatMessage> = conversation_context
+        .messages
+        .iter()
+        .map(|msg| crate::utils::api::ChatMessage {
+            role: msg.role.clone(),
+            content: msg.content.clone(),
+        })
+        .collect();
 
     // 優先使用配置中的 API 金鑰，如果沒有則嘗試從環境變數獲取
     let effective_api_key = api_config
@@ -386,6 +398,7 @@ async fn handle_message(ctx: &serenity::Context, msg: &serenity::Message, data: 
         "嘗試從環境變數獲取API金鑰，provider={:?}",
         api_config.provider
     );
+
     // 檢查是否找到有效的 API 金鑰
     if effective_api_key.is_none() {
         log::warn!("伺服器 {} 沒有有效的API金鑰", guild_id);
@@ -407,18 +420,16 @@ async fn handle_message(ctx: &serenity::Context, msg: &serenity::Message, data: 
     // 創建對話請求
     let request = crate::utils::api::ChatCompletionRequest {
         model: api_config.model.clone(),
-        messages: vec![crate::utils::api::ChatMessage {
-            role: "user".to_string(),
-            content: full_content.clone(), // 使用包含上下文的完整內容
-        }],
+        messages: api_messages,
         temperature: Some(0.7),
         max_tokens: Some(1024),
     };
 
     log::info!(
-        "API請求準備就緒: model={}, content_length={}",
+        "API請求準備就緒: model={}, messages={}, tokens={}",
         api_config.model,
-        full_content.len()
+        request.messages.len(),
+        conversation_context.total_tokens
     );
 
     // 發送 typing 指示器
@@ -534,21 +545,6 @@ fn limit_chinese_chars(s: &str, max_count: usize) -> String {
     }
 
     result
-}
-
-// 簡化消息內容，去除冗餘信息
-fn simplify_message(content: &str) -> String {
-    // 移除URL
-    let re_url =
-        regex::Regex::new(r"https?://[^\s]+").unwrap_or_else(|_| regex::Regex::new(r"$^").unwrap());
-    let content = re_url.replace_all(content, "[URL]");
-
-    // 移除過長的空白字符
-    let re_whitespace =
-        regex::Regex::new(r"\s+").unwrap_or_else(|_| regex::Regex::new(r"$^").unwrap());
-    let content = re_whitespace.replace_all(&content, " ");
-
-    content.to_string()
 }
 
 fn remove_bot_mention(content: &str, bot_id: serenity::UserId) -> String {
