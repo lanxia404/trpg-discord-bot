@@ -404,12 +404,24 @@ impl MemoryManager {
             
             let rows = stmt
                 .query_map([&guild_id, &channel_id, &limit.to_string()], |row| {
+                    // 嘗試獲取 created_at，支持 TEXT 和 INTEGER 兩種類型
+                    let timestamp: String = match row.get::<_, String>(2) {
+                        Ok(t) => t,
+                        Err(_) => {
+                            // 如果是 INTEGER 類型，轉換為字符串
+                            match row.get::<_, i64>(2) {
+                                Ok(t) => t.to_string(),
+                                Err(_) => chrono::Utc::now().to_rfc3339(),
+                            }
+                        }
+                    };
+                    
                     Ok(ChatMessage {
                         user_id: row.get(0)?,
                         message: row.get(1)?,
-                        timestamp: row.get(2)?,
-                        content: row.get(1)?, // 使用 content 作為 content
-                        username: "Unknown".to_string(), // 默認用戶名，因為數據庫中沒有存儲
+                        timestamp,
+                        content: row.get(1)?,
+                        username: "Unknown".to_string(),
                     })
                 })?
                 .collect::<std::result::Result<Vec<_>, _>>()?;
