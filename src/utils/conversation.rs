@@ -71,47 +71,61 @@ impl ConversationManager {
         user_message: &str,
         strategy: ContextStrategy,
     ) -> Result<ConversationContext> {
-        // 1. 獲取 API 配置以確定模型的上下文窗口
+        // 1. 獲取伺服器配置
+        let guild_config = {
+            let config = self.config.lock().await;
+            config.get_guild_config(guild_id).await
+        };
+        
+        // 2. 獲取 API 配置以確定模型的上下文窗口
         let api_config = self.api_manager.get_guild_config(guild_id).await;
         let max_context_tokens = self.get_model_context_window(&api_config.model);
 
-        // 預留給回應的 token (通常是上下文的 1/4)
-        let available_tokens = (max_context_tokens as f32 * 0.75) as usize;
+        // 使用配置的 token 預算比例
+        let available_tokens = (max_context_tokens as f32 * guild_config.context_config.token_budget_ratio) as usize;
 
         log::info!(
-            "構建對話上下文: guild_id={}, channel_id={}, max_tokens={}, available_tokens={}",
+            "構建對話上下文: guild_id={}, channel_id={}, max_tokens={}, available_tokens={}, ratio={}",
             guild_id,
             channel_id,
             max_context_tokens,
-            available_tokens
+            available_tokens,
+            guild_config.context_config.token_budget_ratio
         );
 
-        // 2. 獲取系統提示詞
-        let system_prompt = self.build_system_prompt(guild_id).await?;
+        // 3. 獲取系統提示詞
+        let system_prompt = self.build_system_prompt(guild_id, &guild_config).await?;
         let mut used_tokens = self.estimate_tokens(&system_prompt);
 
-        // 3. 為當前訊息預留空間
+        // 4. 為當前訊息預留空間
         let current_message_tokens = self.estimate_tokens(user_message);
         used_tokens += current_message_tokens;
 
-        // 4. 使用 RAG 檢索相關記憶
+        // 5. 使用 RAG 檢索相關記憶
         let retrieved_memories = self
             .retrieve_relevant_memories(
                 guild_id,
                 channel_id,
                 user_id,
                 user_message,
-                (available_tokens - used_tokens) / 4, // 分配 25% 給記憶
+                available_tokens.saturating_sub(used_tokens),
+                &guild_config.context_config,
             )
             .await?;
 
         let memories_text = retrieved_memories.join("\n");
         used_tokens += self.estimate_tokens(&memories_text);
 
-        // 5. 獲取對話歷史
+        // 6. 獲取對話歷史
         let remaining_tokens = available_tokens.saturating_sub(used_tokens);
         let conversation_history = self
-            .get_conversation_history(guild_id, channel_id, remaining_tokens, strategy)
+            .get_conversation_history(
+                guild_id,
+                channel_id,
+                remaining_tokens,
+                strategy,
+                &guild_config.context_config,
+            )
             .await?;
 
         // 6. 構建最終上下文
@@ -225,11 +239,27 @@ impl ConversationManager {
     }
 
     /// 構建系統提示詞
-    async fn build_system_prompt(&self, guild_id: u64) -> Result<String> {
-        let config = self.config.lock().await;
-        let guild_config = config.get_guild_config(guild_id).await;
-        drop(config);
-
+    async fn build_system_prompt(&self, guild_id: u64, guild_config: &crate::models::types::GuildConfig) -> Result<String> {
+        // 如果有自定義提示詞，優先使用
+        if let Some(custom_prompt) = &guild_config.custom_system_prompt {
+            log::info!("使用自定義系統提示詞 for guild {}", guild_id);
+            
+            let mut prompt = custom_prompt.clone();
+            
+            // 仍然添加 D&D 規則
+            if let Some(dnd_rules) = Some(&guild_config.dnd_rules) {
+                prompt.push_str(&format!(
+                    "\n\n伺服器 D&D 規則:\n\
+                     - 大成功: {}\n\
+                     - 大失敗: {}\n",
+                    dnd_rules.critical_success, dnd_rules.critical_fail
+                ));
+            }
+            
+            return Ok(prompt);
+        }
+        
+        // 使用預設提示詞
         let mut prompt = String::from(
             "你是一個專業的 TRPG (桌上角色扮演遊戲) 助手。\n\
              你的任務是幫助玩家和 GM (遊戲主持人) 進行遊戲。\n\
@@ -264,12 +294,25 @@ impl ConversationManager {
         user_id: u64,
         query: &str,
         max_tokens: usize,
+        context_config: &crate::models::types::ContextConfig,
     ) -> Result<Vec<String>> {
         use crate::utils::memory::SearchOptions;
 
         // 計算可以檢索多少條記憶
         let estimated_tokens_per_memory = 100; // 平均每條記憶約 100 tokens
-        let max_results = (max_tokens / estimated_tokens_per_memory).clamp(3, 10);
+        let calculated_results = max_tokens / estimated_tokens_per_memory;
+        let max_results = calculated_results.clamp(
+            context_config.min_memory_results,
+            context_config.max_memory_results,
+        );
+
+        log::info!(
+            "RAG 檢索記憶: max_tokens={}, max_results={} (range: {}-{})",
+            max_tokens,
+            max_results,
+            context_config.min_memory_results,
+            context_config.max_memory_results
+        );
 
         let options = SearchOptions {
             max_results,
@@ -311,11 +354,28 @@ impl ConversationManager {
         channel_id: u64,
         max_tokens: usize,
         strategy: ContextStrategy,
+        context_config: &crate::models::types::ContextConfig,
     ) -> Result<Vec<ConversationMessage>> {
+        // 根據配置計算限制
+        let estimated_tokens_per_message = 50;
+        let calculated_limit = max_tokens / estimated_tokens_per_message;
+        let limit = calculated_limit.clamp(
+            context_config.min_history_messages,
+            context_config.max_history_messages,
+        );
+
+        log::info!(
+            "獲取對話歷史: max_tokens={}, limit={} (range: {}-{})",
+            max_tokens,
+            limit,
+            context_config.min_history_messages,
+            context_config.max_history_messages
+        );
+        
         // 獲取最近的對話記錄
         let history = self
             .memory_manager
-            .get_recent_messages(guild_id, channel_id, 100)
+            .get_recent_messages(guild_id, channel_id, limit)
             .await?;
 
         let mut messages = Vec::new();

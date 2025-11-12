@@ -55,11 +55,32 @@ pub struct MemoryManager {
 
 impl MemoryManager {
     pub async fn new(db_path: &str, api_manager: Option<Arc<ApiManager>>, vector_storage_method: VectorStorageMethod) -> Result<Self> {
-        let conn = Arc::new(Connection::open(db_path).await?);
+        // 確保資料庫目錄存在且可寫
+        if let Some(parent) = std::path::Path::new(db_path).parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        
+        // 嘗試打開資料庫，如果失敗則提供詳細錯誤訊息
+        let conn = Arc::new(Connection::open(db_path).await.map_err(|e| {
+            log::error!("無法打開資料庫 {}: {}", db_path, e);
+            anyhow::Error::msg(format!("資料庫打開失敗: {}", e))
+        })?);
+        
+        // 測試資料庫是否可寫
+        conn.call(|conn| {
+            conn.execute("CREATE TABLE IF NOT EXISTS _write_test (id INTEGER)", [])?;
+            conn.execute("DROP TABLE IF EXISTS _write_test", [])?;
+            Ok(())
+        }).await.map_err(|e| {
+            log::error!("資料庫寫入測試失敗 {}: {}", db_path, e);
+            anyhow::Error::msg(format!("資料庫不可寫: {}. 請檢查檔案權限", e))
+        })?;
         
         // 初始化數據庫表
         Self::init_db(&conn).await?;
 
+        log::info!("記憶管理器初始化成功: {}", db_path);
+        
         Ok(Self {
             db_conn: conn,
             api_manager,

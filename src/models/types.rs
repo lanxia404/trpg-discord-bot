@@ -41,6 +41,10 @@ pub struct GuildConfig {
     pub memory_enabled_users: std::collections::HashMap<String, bool>, // 記憶功能開關：使用者ID -> 是否啟用
     #[serde(default)]
     pub memory_vector_storage_method: VectorStorageMethod, // 向量儲存計算方式
+    #[serde(default)]
+    pub custom_system_prompt: Option<String>, // 自定義系統提示詞
+    #[serde(default)]
+    pub context_config: ContextConfig, // 上下文配置
 }
 
 // 記憶向量儲存方式
@@ -51,6 +55,28 @@ pub enum VectorStorageMethod {
     Local,          // 本地計算和儲存
     EmbeddingApi,   // 使用嵌入API
     VectorDatabase, // 使用向量資料庫
+}
+
+// 上下文配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextConfig {
+    pub token_budget_ratio: f32,      // 輸入/輸出比例 (預設 0.75)
+    pub max_memory_results: usize,    // 最大記憶檢索數 (預設 10)
+    pub max_history_messages: usize,  // 最大歷史訊息數 (預設 30)
+    pub min_memory_results: usize,    // 最小記憶檢索數 (預設 3)
+    pub min_history_messages: usize,  // 最小歷史訊息數 (預設 5)
+}
+
+impl Default for ContextConfig {
+    fn default() -> Self {
+        Self {
+            token_budget_ratio: 0.75,
+            max_memory_results: 10,
+            max_history_messages: 30,
+            min_memory_results: 3,
+            min_history_messages: 5,
+        }
+    }
 }
 
 
@@ -69,6 +95,8 @@ impl Default for GuildConfig {
             api_config: None,
             memory_enabled_users: std::collections::HashMap::new(),
             memory_vector_storage_method: VectorStorageMethod::Local,
+            custom_system_prompt: None,
+            context_config: ContextConfig::default(),
         }
     }
 }

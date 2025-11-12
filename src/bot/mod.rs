@@ -16,6 +16,7 @@ pub fn commands() -> Vec<poise::Command<data::BotData, Error>> {
         commands::help::help(),
         commands::import::import_data(),
         commands::memory::memory(),
+        commands::prompt::prompt(),
         commands::summarize::summarize(),
     ]
 }
