@@ -22,6 +22,10 @@ async fn main() -> Result<(), bot::Error> {
 
     dotenvy::dotenv().ok();
 
+    // 啟動 .env 熱載入監視器
+    let _env_watcher = utils::env_watcher::EnvWatcher::new(".env")
+        .map_err(|e| anyhow!("環境變數監視器初始化失敗: {}", e))?;
+
     let token =
         env::var("DISCORD_TOKEN").map_err(|_| anyhow!("預期 DISCORD_TOKEN 環境變數，但找不到!"))?;
 
